@@ -52,17 +52,17 @@ const uint32_t BTN_COLS[NUM_BTNS] = {COL_BLUE, COL_GREEN, COL_YELLOW, COL_RED};
 ///// TIMING
 
 #define DEBOUNCE 			5		// (ms) Button debounce time
-#define LED_REFRESH 		200 	// (ms) Refresh rate of LED patterns
+#define LED_REFRESH 		100 	// (ms) Refresh rate of LED patterns
 #define LED_EFFECT_TIME		150		// (ms) Interval of LED effects
-#define LED_EFFECT_LOOP		6 		// Multiplier of LED effect time
+#define LED_EFFECT_LOOP		10 		// Multiplier of LED effect time
 
 // StepTime (ms) is the on & off time intervals of steps played back in a sequence. 
 // SEQ_STEP_PER_BLOCK indicates when speed increases - i.e. after level = SEQ_STEP_PER_BLOCK, seq_StepTime[1] is used for interval
 // For levels higher than sizeof(seq_StepTime) * SEQ_STEP_PER_BLOCK, seq_StepTime[sizeof(seq_StepTime) -1] is used
 // When in ST_SeqRec, 2*seq_StepTime is the allowed space for players to press button
-uint16_t seq_StepTime[] = {1000, 900, 800, 700, 600, 500, 400, 300};
+uint16_t seq_StepTime[] = {1000, 900, 800, 700, 600, 500, 400, 300, 200};
 uint8_t seq_StepTimeStage = 0;
-#define SEQ_STEP_PER_BLOCK	5
+#define SEQ_STEP_PER_BLOCK	4
 
 #define SEQ_INPUTTIME_MULT	3 		// SEQ_INPUTTIME_MULT * seq_StepTime[x] = max allowed time to press button
 
@@ -255,10 +255,7 @@ void loop()
 			{
 				// Turn off previously lit buttons
 				if ((lasttime + seq_StepTime[seq_StepTimeStage]) < millis())
-				{
-					Serial.print("Off with their heads!");
 					OffAllButtons();
-				}
 
 				lastBtnPressed = checkButtons();		// check for input
 				if(lastBtnPressed != NUM_BTNS)			// If any button pressed...
@@ -271,18 +268,14 @@ void loop()
 					{
 						#ifdef debugMSG
 							Serial.println(F("Correct"));
+							Serial.print(F("Step Number = "));
+							Serial.println(seq_RecPlayStep);
 						#endif
 
 						if (seq_RecPlayStep >= seq_level-1)	// Go to next state if finished recording sequence
 							currentState = ST_Correct;
 						else
-							seq_RecPlayStep++;
-
-						Serial.print(F("seq_RecPlayStep = "));
-						Serial.print(seq_RecPlayStep);
-						Serial.print(F(", seq_level = "));
-						Serial.println(seq_level);
-							
+							seq_RecPlayStep++;							
 					}
 					else
 					{
@@ -327,7 +320,7 @@ void loop()
 			if (lastState != ST_Correct)						// Keep buttons lit from last State, then play animation
 			{
 				// Note: need to measure button presses once we're out of this section so can't use break then
-				if ((lasttime + seq_StepTime[seq_StepTimeStage]) > millis())		
+				if ((lasttime + LED_EFFECT_TIME) > millis())		
 					break; 
 			
 				lasttime = millis();
@@ -468,7 +461,10 @@ void updateLEDs()
 				return; 
 			
 			for(uint8_t i = 0; i < NUM_LEDS; i++) 
-				leds[i] = CHSV(hue++, 255, 255);
+			{
+				leds[i] = CHSV(hue, 255, 255);
+				hue += 255/NUM_LEDS;
+			}
 
 			break;
 
