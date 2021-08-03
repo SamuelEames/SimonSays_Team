@@ -41,6 +41,8 @@ CRGB leds[NUM_LEDS]; // Define the array of leds
 #define COL_GREEN   0x00FF00
 #define COL_BLUE    0x0000FF
 
+const uint32_t BTN_COLS[NUM_BTNS] = {COL_RED, COL_YELLOW, COL_GREEN, COL_BLUE};
+
 #define COL_WHITE   0xFFFF7F
 #define COL_BLACK   0x000000
 
@@ -49,23 +51,34 @@ CRGB leds[NUM_LEDS]; // Define the array of leds
 
 ///// TIMING
 
-#define DEBOUNCE 			5		// Button debounce time
-#define LED_REFRESH 		500 	// Refresh rate of LED patterns
-#define LED_EFFECT_TIME		400		// Interval of LED effects
-#define LED_EFFECT_LOOP		5 		// Multiplier of LED effect time
+#define DEBOUNCE 			5		// (ms) Button debounce time
+#define LED_REFRESH 		200 	// (ms) Refresh rate of LED patterns
+#define LED_EFFECT_TIME		300		// (ms) Interval of LED effects
+#define LED_EFFECT_LOOP		6 		// Multiplier of LED effect time
+
+// StepTime (ms) is the on & off time intervals of steps played back in a sequence. 
+// SEQ_STEP_PER_BLOCK indicates when speed increases - i.e. after level = SEQ_STEP_PER_BLOCK, seq_StepTime[1] is used for interval
+// For levels higher than sizeof(seq_StepTime) * SEQ_STEP_PER_BLOCK, seq_StepTime[sizeof(seq_StepTime) -1] is used
+// When in ST_SeqRec, 2*seq_StepTime is the allowed space for players to press button
+uint16_t seq_StepTime[] = {1000, 900, 800, 700, 600, 500, 400, 300};
+uint8_t seq_StepTimeStage = 0;
+#define SEQ_STEP_PER_BLOCK	5
 
 
 ///// PATTERN
-#define SEQ_MAX_LEN	100 			// Maximum sequence length
+#define SEQ_MAX_LEN	255				// Maximum sequence length (maximum value uint8_t can store)
 uint8_t sequence[SEQ_MAX_LEN];		// Holds sequence used for game
-uint8_t seq_stage = 0;				// Current level achieved of sequence - increments with each success
-
+uint8_t seq_level = 0;				// Current level achieved of sequence - increments with each success
+uint8_t seq_RecPlayStep = 0;		// Current step being either played back or recorded
+uint8_t highscore = 0;				// Holds highest achieved level (since power on);
+uint8_t seq_LightOn = 0;			// (bool) holds whether in on or off state of playing sequence
 
 
 
 //// GAME STATE
 
 gameStates currentState = ST_Lobby;
+gameStates lastState = ST_Lobby;
 
 
 void setup() 
@@ -113,18 +126,84 @@ void setup()
 
 void loop() 
 {
-	updateLEDs();
+	static long lasttime;
+
+
+	
 
 	switch (currentState) 
 	{
 		case ST_Lobby: // Waiting for someone to initiate a game by pressing any button
-			if(checkButtons() != NUM_BTNS)
+			updateLEDs();
+			if(checkButtons() != NUM_BTNS) 		// start game if any button is pressed
+			{
+				lastState = currentState;
 				currentState = ST_Intro;
+			}
 			break;
 		case ST_Intro:
+			updateLEDs();
 			// Refer to LED function for this part
 			break;
 		case ST_SeqPlay:
+			if (lastState == ST_Intro)
+			{
+				generateSequence();
+				lastState = ST_SeqPlay;
+
+				// Reset variables
+				seq_RecPlayStep = 0;
+				seq_StepTimeStage = 0;
+				lasttime = millis(); 			// Initiate timer
+
+				OffAllButtons();
+			}
+
+
+			// Timing
+			if (millis() < lasttime) 			// Timer wrapped -- reset (should never be an issue here)
+				lasttime = millis();
+
+
+
+			if ((lasttime + seq_StepTime[seq_StepTimeStage]) > millis())		
+				break; 
+			
+			lasttime = millis();
+
+			// Show SeqStep
+			if (seq_LightOn)					// Currently on --> turn off
+			{
+				OffAllButtons();
+				seq_LightOn = !seq_LightOn;
+			}
+			else 								// Currently off --> turn on
+			{
+				LightButton(sequence[seq_RecPlayStep++]);
+				seq_LightOn = !seq_LightOn;
+
+
+				// Calculate StepTimeStage
+				seq_StepTimeStage = floor(seq_RecPlayStep/SEQ_STEP_PER_BLOCK);
+				if (seq_StepTimeStage >= sizeof(seq_StepTime) / sizeof(seq_StepTime[0]))		// NOTE: sizeof returns number of bytes, so divide by number of bytes per variable
+					seq_StepTimeStage = (sizeof(seq_StepTime) / sizeof(seq_StepTime[0])) -1;	// -1 because index starts at 0
+			}
+
+
+			if (seq_RecPlayStep >= SEQ_MAX_LEN)	// Winner winner chicken dinner!
+			{
+				seq_RecPlayStep = 0;
+				// TODO: handle this case better - all levels achieved
+			}
+			
+			
+
+
+
+
+
+
+
 			break;
 		case ST_SeqRec:
 		// statements
@@ -146,12 +225,24 @@ void generateSequence()
 	// Seed random number generator
 	randomSeed(analogRead(RAND_ANALOG_PIN));
 
+	#ifdef debugMSG
+		Serial.print(F("Sequence ="));
+	#endif
+
 	// fill sequence with random numbers according to number of buttons used in game
 	for (uint8_t i = 0; i < SEQ_MAX_LEN; ++i)
 		{
 			sequence[i] = random(0, NUM_BTNS);
-			Serial.println(sequence[i]);
+
+			#ifdef debugMSG
+				Serial.print(F(" "));
+				Serial.print(sequence[i]);
+			#endif
 		}
+
+		#ifdef debugMSG
+			Serial.println();
+		#endif
 
 	return;
 }
@@ -168,7 +259,7 @@ uint8_t checkButtons()
 	if (millis() < lasttime) 						// Millis() wrapped around - restart timer
 		lasttime = millis();
 
-	if ((lasttime + LED_REFRESH) > millis())			// Debounce timer hasn't elapsed
+	if ((lasttime + DEBOUNCE) > millis())			// Debounce timer hasn't elapsed
 		return NUM_BTNS; 
 	
 	lasttime = millis();							// Debouncing complete; record new time & continue
@@ -177,14 +268,6 @@ uint8_t checkButtons()
 	for (uint8_t i = 0; i < NUM_BTNS; ++i)
 	{
 		btnState_now[i] = digitalRead(Button[i]);	// Read input
-
-		// Serial.print("Button number = ");
-		// Serial.print(i);
-		// Serial.print("\t State = ");
-		// Serial.print(btnState_now[i]);
-		// Serial.print("\t PrevState = ");
-		// Serial.println(btnState_last[i]);
-
 
 		if (btnState_now[i] != btnState_last[i]) 	// If button state changed 
 		{
@@ -238,20 +321,24 @@ void updateLEDs()
 				return; 
 			
 			if (effect_step++ % 2)
-				fill_solid( leds, NUM_LEDS, COL_BLACK);
-			else
 				fill_solid( leds, NUM_LEDS, COL_WHITE);
+			else
+				fill_solid( leds, NUM_LEDS, COL_BLACK);
 
 
 			if (effect_step > LED_EFFECT_LOOP)
 			{
 				effect_step = 0;
-				generateSequence();
+				lastState = currentState;
 				currentState = ST_SeqPlay;
 			}
 		
 			break;
 		case ST_SeqPlay:
+			if (lastState != ST_SeqPlay)
+				
+
+
 		// statements
 			break;
 		case ST_SeqRec:
@@ -273,4 +360,23 @@ void updateLEDs()
 	FastLED.show(); 
 }
 
+void LightButton(uint8_t button)
+{
+	// Lights up according to given button number
 
+
+	fill_solid( leds, NUM_LEDS, BTN_COLS[button]);
+	FastLED.show();
+
+	return;
+}
+
+void OffAllButtons()
+{
+	// Turns off lights on buttons
+
+	fill_solid( leds, NUM_LEDS, COL_BLACK);
+	FastLED.show();
+
+	return;
+}
