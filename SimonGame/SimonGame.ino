@@ -9,28 +9,30 @@
 
 ///////////////////////// IO /////////////////////////
 #define NUM_BTNS 4
-const uint8_t Button[NUM_BTNS] = {18, 8, 20, 21};
 
+
+#define BUZZ_PIN 		5
+#define LED_PIN 		6
+const uint8_t Button[NUM_BTNS] = {7, 8, 9, 10};	// Pins for buttons
+#define RF_CSN_PIN		18
+#define RF_CE_PIN 		19
+#define DISP_CS_PIN		20
+#define RAND_ANALOG_PIN	21 				// Analog pin -- Leave pin floating -- used to seed random number generator
+
+// Button state arrays
 uint8_t btnState_last[NUM_BTNS];		// State of buttons on previous iteration
 uint8_t btnState_now[NUM_BTNS];			// Last read state of buttons
-uint8_t btnState_flag[NUM_BTNS];		// 
-
-#define BUZZ_PIN 5
-#define RAND_ANALOG_PIN	10 				// Leave pin floating -- used to seed random number generator
-
-
-
 
 //////////////////// RF Variables ////////////////////
-RF24 myRadio (19, 18); // CE, CSN
+RF24 myRadio (RF_CE_PIN, RF_CSN_PIN); // CE, CSN
 byte addresses[][6] = {"973126"};
 
 const byte numChars = 32;
 char receivedChars[numChars];
 
 //////////////////// Pixel Setup ////////////////////
-#define NUM_LEDS 12
-#define DATA_PIN 6
+#define NUM_LEDS 	12
+
 CRGB leds[NUM_LEDS]; // Define the array of leds
 
 #define LED_BRIGHTNESS 10
@@ -60,7 +62,7 @@ const uint32_t BTN_COLS[NUM_BTNS] = {COL_BLUE, COL_GREEN, COL_YELLOW, COL_RED};
 // SEQ_STEP_PER_BLOCK indicates when speed increases - i.e. after level = SEQ_STEP_PER_BLOCK, seq_StepTime[1] is used for interval
 // For levels higher than sizeof(seq_StepTime) * SEQ_STEP_PER_BLOCK, seq_StepTime[sizeof(seq_StepTime) -1] is used
 // When in ST_SeqRec, 2*seq_StepTime is the allowed space for players to press button
-uint16_t seq_StepTime[] = {1000, 900, 800, 700, 600, 500, 400, 300, 200};
+uint16_t seq_StepTime[] = {600, 550, 500, 450, 400, 350, 300, 250, 200};
 uint8_t seq_StepTimeStage = 0;
 #define SEQ_STEP_PER_BLOCK	4
 
@@ -97,7 +99,7 @@ void setup()
 
 
 	// Initialise LEDs
-	FastLED.addLeds<WS2812B, DATA_PIN, GRB>(leds, NUM_LEDS);
+	FastLED.addLeds<WS2812B, LED_PIN, GRB>(leds, NUM_LEDS);
 	fill_solid( leds, NUM_LEDS, COL_BLACK);
 	FastLED.setBrightness(LED_BRIGHTNESS);
 	FastLED.show();
