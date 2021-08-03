@@ -41,7 +41,7 @@ CRGB leds[NUM_LEDS]; // Define the array of leds
 #define COL_GREEN   0x00FF00
 #define COL_BLUE    0x0000FF
 
-const uint32_t BTN_COLS[NUM_BTNS] = {COL_RED, COL_YELLOW, COL_GREEN, COL_BLUE};
+const uint32_t BTN_COLS[NUM_BTNS] = {COL_BLUE, COL_GREEN, COL_YELLOW, COL_RED};
 
 #define COL_WHITE   0xFFFF7F
 #define COL_BLACK   0x000000
@@ -53,7 +53,7 @@ const uint32_t BTN_COLS[NUM_BTNS] = {COL_RED, COL_YELLOW, COL_GREEN, COL_BLUE};
 
 #define DEBOUNCE 			5		// (ms) Button debounce time
 #define LED_REFRESH 		200 	// (ms) Refresh rate of LED patterns
-#define LED_EFFECT_TIME		300		// (ms) Interval of LED effects
+#define LED_EFFECT_TIME		150		// (ms) Interval of LED effects
 #define LED_EFFECT_LOOP		6 		// Multiplier of LED effect time
 
 // StepTime (ms) is the on & off time intervals of steps played back in a sequence. 
@@ -64,6 +64,8 @@ uint16_t seq_StepTime[] = {1000, 900, 800, 700, 600, 500, 400, 300};
 uint8_t seq_StepTimeStage = 0;
 #define SEQ_STEP_PER_BLOCK	5
 
+#define SEQ_INPUTTIME_MULT	3 		// SEQ_INPUTTIME_MULT * seq_StepTime[x] = max allowed time to press button
+
 
 ///// PATTERN
 #define SEQ_MAX_LEN	255				// Maximum sequence length (maximum value uint8_t can store)
@@ -72,7 +74,7 @@ uint8_t seq_level = 0;				// Current level achieved of sequence - increments wit
 uint8_t seq_RecPlayStep = 0;		// Current step being either played back or recorded
 uint8_t highscore = 0;				// Holds highest achieved level (since power on);
 uint8_t seq_LightOn = 0;			// (bool) holds whether in on or off state of playing sequence
-
+uint8_t lastBtnPressed = NUM_BTNS;
 
 
 //// GAME STATE
@@ -146,25 +148,28 @@ void loop()
 			// Refer to LED function for this part
 			break;
 		case ST_SeqPlay:
+			
+			// Reset variables
 			if (lastState == ST_Intro)
 			{
 				generateSequence();
-				lastState = ST_SeqPlay;
-
-				// Reset variables
-				seq_RecPlayStep = 0;
 				seq_StepTimeStage = 0;
-				lasttime = millis(); 			// Initiate timer
 
-				OffAllButtons();
 			}
+			if (lastState != ST_SeqPlay)
+			{
+				lasttime = millis(); 			// Initiate timer
+				OffAllButtons();
+				seq_RecPlayStep = 0;
+				lastState = currentState;
+			}
+
+			
 
 
 			// Timing
 			if (millis() < lasttime) 			// Timer wrapped -- reset (should never be an issue here)
 				lasttime = millis();
-
-
 
 			if ((lasttime + seq_StepTime[seq_StepTimeStage]) > millis())		
 				break; 
@@ -193,27 +198,184 @@ void loop()
 			if (seq_RecPlayStep >= SEQ_MAX_LEN)	// Winner winner chicken dinner!
 			{
 				seq_RecPlayStep = 0;
-				// TODO: handle this case better - all levels achieved
+				// TODO: handle this case better - all levels achieved!
+			}
+
+
+			// GOTO Record state if we've finished playing sequence
+			if (!seq_LightOn && (seq_RecPlayStep > seq_level))
+			{
+				currentState = ST_SeqRec;
+				seq_level++;
+
+				OffAllButtons();
 			}
 			
-			
-
-
-
-
-
 
 
 			break;
+
+
 		case ST_SeqRec:
-		// statements
+
+			// Timing							// Note: timer still running from last stage & StepTime same as Play Stage
+			if (millis() < lasttime) 			// Timer wrapped -- reset (should never be an issue here)
+				lasttime = millis();
+
+			// Start indicator
+			if (lastState == ST_SeqPlay)						// Light all buttons white to indicate start of record sequence
+			{
+				// Note: need to measure button presses once we're out of this section so can't use break then
+				if ((lasttime + seq_StepTime[seq_StepTimeStage]) > millis())		
+					break; 
+			
+				lasttime = millis();
+
+
+				if (seq_LightOn) 
+				{
+					OffAllButtons();							// Start rec with all black again
+					lastState = currentState;
+					seq_LightOn = !seq_LightOn;
+					seq_RecPlayStep = 0;						// Reset step variable when starting record sequence
+				}
+				else 											// NOTE: this is run first
+				{
+					fill_solid( leds, NUM_LEDS, COL_WHITE);	 	// All White
+					FastLED.show();
+					seq_LightOn = !seq_LightOn;		
+				}
+
+				break;
+			}
+
+
+			// Record player inputs!
+			if ((lasttime + (seq_StepTime[seq_StepTimeStage] * SEQ_INPUTTIME_MULT)) > millis())	
+			{
+				// Turn off previously lit buttons
+				if ((lasttime + seq_StepTime[seq_StepTimeStage]) < millis())
+				{
+					Serial.print("Off with their heads!");
+					OffAllButtons();
+				}
+
+				lastBtnPressed = checkButtons();		// check for input
+				if(lastBtnPressed != NUM_BTNS)			// If any button pressed...
+				{
+					LightButton(lastBtnPressed);		// Light up button colour that was pressed
+					lasttime = millis();				// reset timer on button press
+				
+					// Check correct button was pressed
+					if (lastBtnPressed == sequence[seq_RecPlayStep])
+					{
+						#ifdef debugMSG
+							Serial.println(F("Correct"));
+						#endif
+
+						if (seq_RecPlayStep >= seq_level-1)	// Go to next state if finished recording sequence
+							currentState = ST_Correct;
+						else
+							seq_RecPlayStep++;
+
+						Serial.print(F("seq_RecPlayStep = "));
+						Serial.print(seq_RecPlayStep);
+						Serial.print(F(", seq_level = "));
+						Serial.println(seq_level);
+							
+					}
+					else
+					{
+						// Incorrect
+						#ifdef debugMSG
+							Serial.println(F("Incorrect"));
+							Serial.print(F("Step Number = "));
+							Serial.print(seq_RecPlayStep);
+							Serial.print(F(", Expected input = "));
+							Serial.print(sequence[seq_RecPlayStep]);
+							Serial.print(F(", Button Pressed = "));
+							Serial.println(lastBtnPressed);
+						#endif
+
+
+						currentState = ST_Incorrect;
+					}
+				}
+
+			}
+			else 										// Failed to press button in allowed time frame --> end game
+			{
+				// Timeout
+				#ifdef debugMSG
+					Serial.println(F("Input timeout"));
+				#endif
+
+				lasttime = millis();
+				currentState = ST_Incorrect;
+			}
+		
+
+
+
+		
 			break;
+
+
 		case ST_Correct:
-		// statements
+
+			// Start indicator
+			if (lastState != ST_Correct)						// Keep buttons lit from last State, then play animation
+			{
+				// Note: need to measure button presses once we're out of this section so can't use break then
+				if ((lasttime + seq_StepTime[seq_StepTimeStage]) > millis())		
+					break; 
+			
+				lasttime = millis();
+
+
+				if (seq_LightOn) 
+				{
+					OffAllButtons();							// Start with all black again
+					lastState = currentState;
+					seq_LightOn = !seq_LightOn;
+				}
+				else 											// NOTE: this is run first
+				{
+					seq_LightOn = !seq_LightOn;		
+				}
+
+				break;
+			}
+
+
+			// Play success animation
+			updateLEDs();
+
 			break;
+
+
 		case ST_Incorrect:
-		// statements
-			break;			
+
+			// Play fail animation
+			updateLEDs();
+
+			// reset variables
+			seq_level = 0;
+
+			// // check for high score
+			// if (seq_level > highscore)
+			// {
+			// 	currentState = ST_HighScore;
+			// 	highscore = seq_level;
+			// }
+			// currentState = ST_Lobby;
+			break;		
+
+		case ST_HighScore:
+			currentState = ST_Lobby;
+			break;
+
+
 		default:
 		// statements
 			break;
@@ -250,7 +412,8 @@ void generateSequence()
 
 uint8_t checkButtons()
 {
-	// Checks button state. Returns true if there was a change
+	// Checks button state
+	// If button just pressed returns that button number, else returns NUM_BTNS
 
 
 	// Debounce buttons
@@ -293,11 +456,6 @@ void updateLEDs()
 	if (millis() < lasttime) 						// Millis() wrapped around - restart timer
 		lasttime = millis();
 
-
-	
-	
-
-
 	static uint8_t hue = 0;
 
 
@@ -335,21 +493,48 @@ void updateLEDs()
 		
 			break;
 		case ST_SeqPlay:
-			if (lastState != ST_SeqPlay)
-				
-
-
-		// statements
+			// Done in main loop
 			break;
+
 		case ST_SeqRec:
-		// statements
+			// Done in main loop
 			break;
+
 		case ST_Correct:
-		// statements
+			if ((lasttime + LED_EFFECT_TIME) > millis())
+				return; 
+
+			fill_solid( leds, NUM_LEDS, COL_WHITE);
+
+			for (uint8_t i = effect_step++ % 2; i < NUM_LEDS; i += 2)
+				leds[i] = COL_GREEN;
+
+			if (effect_step > LED_EFFECT_LOOP)
+			{
+				effect_step = 0;
+				lastState = currentState;
+				currentState = ST_SeqPlay;
+			}
 			break;
+
 		case ST_Incorrect:
-		// statements
-			break;			
+			if ((lasttime + LED_EFFECT_TIME) > millis())
+				return; 
+
+			fill_solid( leds, NUM_LEDS, COL_BLACK);
+
+			for (uint8_t i = effect_step++ % 2; i < NUM_LEDS; i += 2)
+				leds[i] = COL_RED;
+
+			if (effect_step > LED_EFFECT_LOOP)
+			{
+				effect_step = 0;
+				lastState = currentState;
+				currentState = ST_Lobby;
+			}
+			break;
+
+
 		default:
 		// statements
 			break;
