@@ -6,6 +6,10 @@
 #include "FastLED.h"
 #include "RF24.h"
 #include "ENUMVars.h"
+// #include <MD_MAXPanel.h>
+// #include "Font5x3.h"
+#include <MD_MAX72xx.h>
+
 
 ///////////////////////// IO /////////////////////////
 #define NUM_BTNS 4
@@ -23,14 +27,14 @@ const uint8_t Button[NUM_BTNS] = {7, 8, 9, 10};	// Pins for buttons
 uint8_t btnState_last[NUM_BTNS];		// State of buttons on previous iteration
 uint8_t btnState_now[NUM_BTNS];			// Last read state of buttons
 
-//////////////////// RF Variables ////////////////////
-RF24 myRadio (RF_CE_PIN, RF_CSN_PIN); // CE, CSN
+//////////////////// RF VARIABLES ////////////////////
+RF24 myRadio(RF_CE_PIN, RF_CSN_PIN); // CE, CSN
 byte addresses[][6] = {"973126"};
 
 const byte numChars = 32;
 char receivedChars[numChars];
 
-//////////////////// Pixel Setup ////////////////////
+//////////////////// PIXEL SETUP ////////////////////
 #define NUM_LEDS 	12
 
 CRGB leds[NUM_LEDS]; // Define the array of leds
@@ -47,6 +51,18 @@ const uint32_t BTN_COLS[NUM_BTNS] = {COL_BLUE, COL_GREEN, COL_YELLOW, COL_RED};
 
 #define COL_WHITE   0xFFFF7F
 #define COL_BLACK   0x000000
+
+
+//////////////// MATRIX DISPLAY SETUP ////////////////
+const MD_MAX72XX::moduleType_t HARDWARE_TYPE = MD_MAX72XX::FC16_HW;
+// const uint8_t X_DEVICES = 2;
+// const uint8_t Y_DEVICES = 1;
+#define DISP_NUM_PANELS	2
+
+// MD_MAXPanel disp = MD_MAXPanel(HARDWARE_TYPE, DISP_CS_PIN, X_DEVICES, Y_DEVICES);
+MD_MAX72XX disp = MD_MAX72XX(HARDWARE_TYPE, DISP_CS_PIN, DISP_NUM_PANELS);
+
+#define DISP_INTENSITY 2 			// Brightness of display on range 0-14
 
 
 //////////////////// MISC VARIABLES ////////////////////
@@ -87,6 +103,12 @@ gameStates lastState = ST_Lobby;
 
 void setup() 
 {
+	// Initialise Display
+	disp.begin();
+	// disp.setIntensity(DISP_INTENSITY);
+	disp.control(2, DISP_INTENSITY);
+	disp.clear();
+
 	// Initialise IO
 	for (uint8_t i = 0; i < NUM_BTNS; ++i)
 	{
@@ -94,8 +116,10 @@ void setup()
 		btnState_last[i] = 1;				// Set initial assumed button state
 	}
 
+	// Initialise Buzzer
 	pinMode(BUZZ_PIN, OUTPUT);
 	digitalWrite(BUZZ_PIN, HIGH);
+
 
 
 	// Initialise LEDs
@@ -104,7 +128,7 @@ void setup()
 	FastLED.setBrightness(LED_BRIGHTNESS);
 	FastLED.show();
 
-	// Initialise Buzzer
+
 
 	// Initialise Radio
 	myRadio.begin();  
@@ -112,6 +136,7 @@ void setup()
 	myRadio.setPALevel(RF24_PA_MAX);
 	myRadio.setDataRate( RF24_250KBPS );
 	myRadio.openWritingPipe( addresses[0]);
+
 
 	// Initialise Serial debug
 	Serial.begin(115200);
@@ -121,7 +146,6 @@ void setup()
 
 		Serial.println(F("Wassup?"));
 	#endif
-
 
 	// Start the game!
 	
@@ -143,6 +167,7 @@ void loop()
 			{
 				lastState = currentState;
 				currentState = ST_Intro;
+				disp.clear();
 			}
 			break;
 		case ST_Intro:
@@ -240,12 +265,16 @@ void loop()
 					lastState = currentState;
 					seq_LightOn = !seq_LightOn;
 					seq_RecPlayStep = 0;						// Reset step variable when starting record sequence
+					// disp.clear();
+					staticText("GO!");
 				}
 				else 											// NOTE: this is run first
 				{
 					fill_solid( leds, NUM_LEDS, COL_WHITE);	 	// All White
 					FastLED.show();
-					seq_LightOn = !seq_LightOn;		
+					seq_LightOn = !seq_LightOn;	
+
+					solidDisplay();
 				}
 
 				break;
@@ -262,6 +291,7 @@ void loop()
 				lastBtnPressed = checkButtons();		// check for input
 				if(lastBtnPressed != NUM_BTNS)			// If any button pressed...
 				{
+					disp.clear();
 					LightButton(lastBtnPressed);		// Light up button colour that was pressed
 					lasttime = millis();				// reset timer on button press
 				
@@ -445,6 +475,7 @@ void updateLEDs()
 {
 
 	static uint8_t effect_step = 0;
+	// static uint8_t ticker_step = disp.getXMax();
 	// Debounce buttons
 	static long lasttime;
 
@@ -467,6 +498,9 @@ void updateLEDs()
 				leds[i] = CHSV(hue, 255, 255);
 				hue += 255/NUM_LEDS;
 			}
+
+			scrollText("PRESS TO PLAY ");
+			
 
 			break;
 
@@ -562,4 +596,99 @@ void OffAllButtons()
 	FastLED.show();
 
 	return;
+}
+
+
+void scrollText(const char *p)
+{
+	// Scrolling text - starts from where it left off... not sure how to fix that yet
+	// Displays the next frame of given pointer each time it's called
+
+	// static uint8_t *last_p = *p;
+	static uint8_t cBuf[8];  // Column buffer - this should be ok for all built-in fonts
+	static uint8_t charCol = 0;
+	static uint8_t letterNum = 0;
+	static uint8_t charWidth = 0;
+
+
+	// // Reset the things if new string to display
+	// if ((last_p != p) || (*p != *last_p)) // compares ptr and 1st character change... I think - I'm not great with pointers :( 
+	// {
+	// 	// NOTE: This assumes either different ptr value for each string, OR different start charater
+	// 	// That will cover most cases anyway
+	// 	// New string! (probably?) - Reset the things!
+	// 	*last_p = *p;
+	// 	letterNum = 0;
+	// 	disp.clear();		
+	// }
+
+	if (charCol == 0)
+	{
+		// Loop back to start of string
+		if (*(p + letterNum) == '\0')
+			letterNum = 0;
+
+		// For some reason 'spaces' aren't displaying properly - handle this case
+		if (*(p + letterNum) == ' ')
+		{
+			for (uint8_t i = 0; i < sizeof(cBuf); ++i)
+				cBuf[i] = 0x00;
+		}
+		else // Load new char
+			charWidth = disp.getChar(*(p + letterNum), sizeof(cBuf) / sizeof(cBuf[0]), cBuf); 
+
+		letterNum++;
+	}
+
+	// Shift display left one column
+	disp.transform(MD_MAX72XX::TSL);	
+
+	// Display first column of that character
+	disp.setColumn(0, cBuf[charCol++]);
+
+	if (charCol > charWidth)
+		charCol = 0;
+
+
+	return;
+}
+
+void staticText(const char *p)
+{
+	// Prints given text in the center of the display
+
+	uint8_t cBuf[(DISP_NUM_PANELS+1) * 8];	// Screen buffer
+	uint8_t width_full = 0;					// Cumulative width of text
+
+
+	// Work out width of text while loading characters into buffer
+	// While still in string && buffer has space
+	while ( (*p != '\0') && (width_full <= (sizeof(cBuf) / sizeof(cBuf[0]))) )
+	{
+		width_full += disp.getChar(*p++, sizeof(cBuf) / sizeof(cBuf[0]), cBuf + width_full); 
+		cBuf[width_full++] = 0x00; // add 1 col space between characters
+	}
+
+	Serial.print(F("width_full = "));
+	Serial.print(width_full);
+	Serial.print(F(", screen width = "));
+	Serial.print(DISP_NUM_PANELS*8);
+	Serial.print(F(", StartCol = "));
+	Serial.println(DISP_NUM_PANELS*4 - width_full/2);
+
+	// Clear screen
+	disp.clear();
+
+	// Display buffer on screen
+	for (uint8_t i = 0; i < width_full; ++i)
+		disp.setColumn((DISP_NUM_PANELS*4 + width_full/2) - i, cBuf[i]);
+
+	return;
+}
+
+void solidDisplay()
+{
+	// Turns on every pixel on display
+	for (uint8_t i = 0; i < DISP_NUM_PANELS*8; ++i)
+		disp.setColumn(i, 0xFF);
 }
