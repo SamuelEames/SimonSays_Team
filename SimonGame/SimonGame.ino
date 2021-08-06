@@ -73,6 +73,7 @@ MD_MAX72XX disp = MD_MAX72XX(HARDWARE_TYPE, DISP_CS_PIN, DISP_NUM_PANELS);
 #define LED_REFRESH 		100 	// (ms) Refresh rate of LED patterns
 #define LED_EFFECT_TIME		150		// (ms) Interval of LED effects
 #define LED_EFFECT_LOOP		10 		// Multiplier of LED effect time
+#define TICKER_TIME			80		// (ms) Update interval of ticker text
 
 // StepTime (ms) is the on & off time intervals of steps played back in a sequence. 
 // SEQ_STEP_PER_BLOCK indicates when speed increases - i.e. after level = SEQ_STEP_PER_BLOCK, seq_StepTime[1] is used for interval
@@ -154,7 +155,7 @@ void setup()
 
 void loop() 
 {
-	static long lasttime;
+	static uint32_t lasttime;
 
 
 	
@@ -163,6 +164,7 @@ void loop()
 	{
 		case ST_Lobby: // Waiting for someone to initiate a game by pressing any button
 			updateLEDs();
+			scrollText("PRESS TO PLAY ");
 			if(checkButtons() != NUM_BTNS) 		// start game if any button is pressed
 			{
 				lastState = currentState;
@@ -384,20 +386,23 @@ void loop()
 			// Play fail animation
 			updateLEDs();
 
+			// check for high score
+			if (--seq_level > highscore)
+			{
+				currentState = ST_HighScore;
+				highscore = seq_level;
+			}
+			else
+				currentState = ST_Lobby;
+
 			// reset variables
 			seq_level = 0;
 
-			// // check for high score
-			// if (seq_level > highscore)
-			// {
-			// 	currentState = ST_HighScore;
-			// 	highscore = seq_level;
-			// }
-			// currentState = ST_Lobby;
 			break;		
 
 		case ST_HighScore:
-			currentState = ST_Lobby;
+			scrollText("HIGH SCORE ");
+			// currentState = ST_Lobby;
 			break;
 
 
@@ -442,7 +447,7 @@ uint8_t checkButtons()
 
 
 	// Debounce buttons
-	static long lasttime;
+	static uint32_t lasttime;
 
 	if (millis() < lasttime) 						// Millis() wrapped around - restart timer
 		lasttime = millis();
@@ -477,7 +482,7 @@ void updateLEDs()
 	static uint8_t effect_step = 0;
 	// static uint8_t ticker_step = disp.getXMax();
 	// Debounce buttons
-	static long lasttime;
+	static uint32_t lasttime;
 
 	if (millis() < lasttime) 						// Millis() wrapped around - restart timer
 		lasttime = millis();
@@ -499,8 +504,6 @@ void updateLEDs()
 				hue += 255/NUM_LEDS;
 			}
 
-			scrollText("PRESS TO PLAY ");
-			
 
 			break;
 
@@ -509,6 +512,8 @@ void updateLEDs()
 
 			if ((lasttime + LED_EFFECT_TIME) > millis())
 				return; 
+
+			solidDisplay();
 			
 			if (effect_step++ % 2)
 				fill_solid( leds, NUM_LEDS, COL_WHITE);
@@ -521,6 +526,7 @@ void updateLEDs()
 				effect_step = 0;
 				lastState = currentState;
 				currentState = ST_SeqPlay;
+				disp.clear();
 			}
 		
 			break;
@@ -609,6 +615,15 @@ void scrollText(const char *p)
 	static uint8_t charCol = 0;
 	static uint8_t letterNum = 0;
 	static uint8_t charWidth = 0;
+	static uint32_t lasttime = millis();
+
+	if (millis() < lasttime) 						// Millis() wrapped around - restart timer
+		lasttime = millis();
+
+	if ((lasttime + TICKER_TIME) > millis())			// Debounce timer hasn't elapsed
+		return; 
+
+	lasttime = millis();							// It's time! Record new time & continue
 
 
 	// // Reset the things if new string to display
@@ -669,19 +684,12 @@ void staticText(const char *p)
 		cBuf[width_full++] = 0x00; // add 1 col space between characters
 	}
 
-	Serial.print(F("width_full = "));
-	Serial.print(width_full);
-	Serial.print(F(", screen width = "));
-	Serial.print(DISP_NUM_PANELS*8);
-	Serial.print(F(", StartCol = "));
-	Serial.println(DISP_NUM_PANELS*4 - width_full/2);
-
 	// Clear screen
 	disp.clear();
 
 	// Display buffer on screen
 	for (uint8_t i = 0; i < width_full; ++i)
-		disp.setColumn((DISP_NUM_PANELS*4 + width_full/2) - i, cBuf[i]);
+		disp.setColumn((DISP_NUM_PANELS*4 + width_full/2) - i - 1, cBuf[i]); // -1 to shift it to right one col to be more centered
 
 	return;
 }
@@ -691,4 +699,37 @@ void solidDisplay()
 	// Turns on every pixel on display
 	for (uint8_t i = 0; i < DISP_NUM_PANELS*8; ++i)
 		disp.setColumn(i, 0xFF);
+}
+
+
+void dispNumber(uint8_t Number)
+{
+	// Prints given number on display
+	// Doesn't print numbers >= 4 digits
+
+	uint8_t charBuf[4]; // Buffer to store text digits into
+	const uint8_t numOffset = 48; // Value of '0' in ascii table
+
+	// Fill char buff with null characters (so staticText() knows where end of number is)
+	for (uint8_t i = 0; i < sizeof(charBuf) / sizeof(charBuf[0]); ++i)
+		charBuf[i] = '\0';
+
+	if (Number < 10)							// 1 Digit numbers
+		charBuf[0] = Number + numOffset;
+	else if (Number < 100)						// 2 Digit numbers
+	{
+		charBuf[0] = floor(Number / 10) + numOffset;
+		charBuf[1] = Number % 10 + numOffset;
+	}
+	else if (Number < 1000)						// 3 Digit numbers!
+	{
+		charBuf[0] = floor(Number / 100) + numOffset;
+		charBuf[1] = floor((Number % 100) / 10) + numOffset;
+		charBuf[2] = Number % 10 + numOffset;
+	}
+
+	staticText(charBuf);						// Print to screen!
+
+
+	return;
 }
