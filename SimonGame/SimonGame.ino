@@ -6,8 +6,6 @@
 #include "FastLED.h"
 #include "RF24.h"
 #include "ENUMVars.h"
-// #include <MD_MAXPanel.h>
-// #include "Font5x3.h"
 #include <MD_MAX72xx.h>
 
 
@@ -52,28 +50,31 @@ const uint32_t BTN_COLS[NUM_BTNS] = {COL_BLUE, COL_GREEN, COL_YELLOW, COL_RED};
 #define COL_WHITE   0xFFFF7F
 #define COL_BLACK   0x000000
 
+bool effectComplete = false;
+
 
 //////////////// MATRIX DISPLAY SETUP ////////////////
 const MD_MAX72XX::moduleType_t HARDWARE_TYPE = MD_MAX72XX::FC16_HW;
-// const uint8_t X_DEVICES = 2;
-// const uint8_t Y_DEVICES = 1;
 #define DISP_NUM_PANELS	2
 
-// MD_MAXPanel disp = MD_MAXPanel(HARDWARE_TYPE, DISP_CS_PIN, X_DEVICES, Y_DEVICES);
 MD_MAX72XX disp = MD_MAX72XX(HARDWARE_TYPE, DISP_CS_PIN, DISP_NUM_PANELS);
 
 #define DISP_INTENSITY 2 			// Brightness of display on range 0-14
 
+bool scrollTextComplete = false;		// Set to '1' once text completed a full cycle
+
 
 //////////////////// MISC VARIABLES ////////////////////
+
 
 ///// TIMING
 
 #define DEBOUNCE 			5		// (ms) Button debounce time
 #define LED_REFRESH 		100 	// (ms) Refresh rate of LED patterns
 #define LED_EFFECT_TIME		150		// (ms) Interval of LED effects
-#define LED_EFFECT_LOOP		10 		// Multiplier of LED effect time
+#define LED_EFFECT_LOOP		6 		// Multiplier of LED effect time
 #define TICKER_TIME			80		// (ms) Update interval of ticker text
+#define SCORE_DISPLAY		3000	// (ms) Time score is displayed for after a round
 
 // StepTime (ms) is the on & off time intervals of steps played back in a sequence. 
 // SEQ_STEP_PER_BLOCK indicates when speed increases - i.e. after level = SEQ_STEP_PER_BLOCK, seq_StepTime[1] is used for interval
@@ -121,15 +122,11 @@ void setup()
 	pinMode(BUZZ_PIN, OUTPUT);
 	digitalWrite(BUZZ_PIN, HIGH);
 
-
-
 	// Initialise LEDs
 	FastLED.addLeds<WS2812B, LED_PIN, GRB>(leds, NUM_LEDS);
 	fill_solid( leds, NUM_LEDS, COL_BLACK);
 	FastLED.setBrightness(LED_BRIGHTNESS);
 	FastLED.show();
-
-
 
 	// Initialise Radio
 	myRadio.begin();  
@@ -140,42 +137,45 @@ void setup()
 
 
 	// Initialise Serial debug
-	Serial.begin(115200);
-
 	#ifdef debugMSG
-		while (!Serial) ; 								// Wait for serial port to be available
+		Serial.begin(115200);				// Open comms line
+		while (!Serial) ; 					// Wait for serial port to be available
 
 		Serial.println(F("Wassup?"));
 	#endif
 
-	// Start the game!
+	// Let the games begin!
 	
 
 }
 
 void loop() 
 {
-	static uint32_t lasttime;
+	static uint32_t lasttime;				// Used for timining intervals
 
-
-	
 
 	switch (currentState) 
 	{
 		case ST_Lobby: // Waiting for someone to initiate a game by pressing any button
 			updateLEDs();
-			scrollText("PRESS TO PLAY ");
-			if(checkButtons() != NUM_BTNS) 		// start game if any button is pressed
+			
+			if (lastState != ST_Lobby)			// Clears any residual text in scrollText buffer
 			{
+				scrollText(" ");
 				lastState = currentState;
-				currentState = ST_Intro;
-				disp.clear();
 			}
+
+			scrollText("PRESS TO PLAY ");
+			checkStartNewGame();				// Start new game if any button pressed
 			break;
+
+
 		case ST_Intro:
 			updateLEDs();
 			// Refer to LED function for this part
 			break;
+
+
 		case ST_SeqPlay:
 			
 			// Reset variables
@@ -183,7 +183,6 @@ void loop()
 			{
 				generateSequence();
 				seq_StepTimeStage = 0;
-
 			}
 			if (lastState != ST_SeqPlay)
 			{
@@ -192,9 +191,6 @@ void loop()
 				seq_RecPlayStep = 0;
 				lastState = currentState;
 			}
-
-			
-
 
 			// Timing
 			if (millis() < lasttime) 			// Timer wrapped -- reset (should never be an issue here)
@@ -215,7 +211,6 @@ void loop()
 			{
 				LightButton(sequence[seq_RecPlayStep++]);
 				seq_LightOn = !seq_LightOn;
-
 
 				// Calculate StepTimeStage
 				seq_StepTimeStage = floor(seq_RecPlayStep/SEQ_STEP_PER_BLOCK);
@@ -267,7 +262,6 @@ void loop()
 					lastState = currentState;
 					seq_LightOn = !seq_LightOn;
 					seq_RecPlayStep = 0;						// Reset step variable when starting record sequence
-					// disp.clear();
 					staticText("GO!");
 				}
 				else 											// NOTE: this is run first
@@ -324,15 +318,12 @@ void loop()
 							Serial.println(lastBtnPressed);
 						#endif
 
-
 						currentState = ST_Incorrect;
 					}
 				}
-
 			}
 			else 										// Failed to press button in allowed time frame --> end game
 			{
-				// Timeout
 				#ifdef debugMSG
 					Serial.println(F("Input timeout"));
 				#endif
@@ -340,11 +331,7 @@ void loop()
 				lasttime = millis();
 				currentState = ST_Incorrect;
 			}
-		
 
-
-
-		
 			break;
 
 
@@ -374,9 +361,7 @@ void loop()
 				break;
 			}
 
-
-			// Play success animation
-			updateLEDs();
+			updateLEDs();										// Play success animation
 
 			break;
 
@@ -384,32 +369,106 @@ void loop()
 		case ST_Incorrect:
 
 			// Play fail animation
-			updateLEDs();
+			if (effectComplete)
+			{
+				OffAllButtons();
+				effectComplete = false;
+			}
+			else
+			{
+				disp.clear();
+				updateLEDs();
+				break;
+			}
 
 			// check for high score
 			if (--seq_level > highscore)
 			{
 				currentState = ST_HighScore;
 				highscore = seq_level;
+				seq_level = 0;					// Reset seq level after using
 			}
 			else
-				currentState = ST_Lobby;
-
-			// reset variables
-			seq_level = 0;
+				currentState = ST_ShowScore;			
 
 			break;		
 
+
 		case ST_HighScore:
-			scrollText("HIGH SCORE ");
-			// currentState = ST_Lobby;
+			checkStartNewGame();				// Start new game if any button pressed
+			updateLEDs();
+
+			// Scroll 'high score' text, then show number
+			// TODO: make it only run 'dispNumber' once --> I don't like the flickering screen when it's refreshing unnecessarily
+			if (scrollTextComplete)
+				dispNumber(highscore);
+			else
+			{
+				scrollText("HIGH SCORE   ");
+				break;
+			}
+
+
+			// Show high score value for a bit
+			if (lastState != ST_HighScore)
+			{
+				lasttime = millis(); 			// Initiate timer
+				lastState = currentState;
+			}
+
+			// Timing
+			if (millis() < lasttime) 			// Timer wrapped --> reset (should never be an issue here)
+				lasttime = millis();
+
+			if ((lasttime + SCORE_DISPLAY) > millis())		
+				break; 
+			
+			currentState = ST_Lobby;
 			break;
+
+
+		case ST_ShowScore:
+
+			checkStartNewGame();
+			if ((lastState != currentState) && (seq_level != 0))
+			{
+				dispNumber(seq_level);
+				seq_level = 0;					// Reset seq level after using
+				lastState = currentState;
+				lasttime = millis();
+			}
+
+
+			OffAllButtons();
+
+			// Timing
+			if (millis() < lasttime) 			// Timer wrapped --> reset (should never be an issue here)
+				lasttime = millis();
+
+			if ((lasttime + SCORE_DISPLAY) > millis())		
+				break; 
+
+			currentState = ST_Lobby;
 
 
 		default:
 		// statements
 			break;
 	}
+}
+
+
+void checkStartNewGame()
+{
+	// Initiates new game if any button is pressed
+	if(checkButtons() != NUM_BTNS)
+	{
+		lastState = currentState;
+		currentState = ST_Intro;
+		disp.clear();
+	}
+
+	return;
 }
 
 void generateSequence()
@@ -509,6 +568,12 @@ void updateLEDs()
 
 
 		case ST_Intro:
+			if (lastState != ST_Intro)
+			{
+				lasttime = millis();
+				lastState = currentState;
+				effect_step = 0;
+			}
 
 			if ((lasttime + LED_EFFECT_TIME) > millis())
 				return; 
@@ -542,10 +607,7 @@ void updateLEDs()
 			if ((lasttime + LED_EFFECT_TIME) > millis())
 				return; 
 
-			fill_solid( leds, NUM_LEDS, COL_WHITE);
-
-			for (uint8_t i = effect_step++ % 2; i < NUM_LEDS; i += 2)
-				leds[i] = COL_GREEN;
+			effect_2Step(effect_step++, COL_GREEN, COL_WHITE);
 
 			if (effect_step > LED_EFFECT_LOOP)
 			{
@@ -559,17 +621,28 @@ void updateLEDs()
 			if ((lasttime + LED_EFFECT_TIME) > millis())
 				return; 
 
-			fill_solid( leds, NUM_LEDS, COL_BLACK);
-
-			for (uint8_t i = effect_step++ % 2; i < NUM_LEDS; i += 2)
-				leds[i] = COL_RED;
+			effect_2Step(effect_step++, COL_BLACK, COL_RED);
 
 			if (effect_step > LED_EFFECT_LOOP)
 			{
 				effect_step = 0;
-				lastState = currentState;
-				currentState = ST_Lobby;
+				effectComplete = true;
 			}
+			break;
+
+		case ST_HighScore:
+
+			if ((lasttime + LED_EFFECT_TIME/2) > millis())
+				return; 
+
+			fill_solid( leds, NUM_LEDS, COL_BLACK);
+
+			if (effect_step >= NUM_LEDS)
+				effect_step = 0;
+
+			leds[effect_step++] = CHSV(hue, 255, 255);
+			hue += 255/NUM_LEDS;
+
 			break;
 
 
@@ -581,6 +654,19 @@ void updateLEDs()
 	lasttime = millis();
 
 	FastLED.show(); 
+}
+
+
+void effect_2Step(uint8_t step, uint32_t col_1, uint32_t col_2)
+{
+	// Flashes alternate colours on LEDs
+
+	fill_solid( leds, NUM_LEDS, col_1);
+
+	for (uint8_t i = step % 2; i < NUM_LEDS; i += 2)
+		leds[i] = col_2;
+
+	return;
 }
 
 void LightButton(uint8_t button)
@@ -605,13 +691,13 @@ void OffAllButtons()
 }
 
 
-void scrollText(const char *p)
+void scrollText(const uint8_t *p)
 {
-	// Scrolling text - starts from where it left off... not sure how to fix that yet
+	// Scrolling text
 	// Displays the next frame of given pointer each time it's called
 
-	// static uint8_t *last_p = *p;
-	static uint8_t cBuf[8];  // Column buffer - this should be ok for all built-in fonts
+	static uint8_t *last_p = p;
+	static uint8_t cBuf[8];  						// Column buffer - this width should be ok for all built-in fonts
 	static uint8_t charCol = 0;
 	static uint8_t letterNum = 0;
 	static uint8_t charWidth = 0;
@@ -620,28 +706,38 @@ void scrollText(const char *p)
 	if (millis() < lasttime) 						// Millis() wrapped around - restart timer
 		lasttime = millis();
 
-	if ((lasttime + TICKER_TIME) > millis())			// Debounce timer hasn't elapsed
+	if ((lasttime + TICKER_TIME) > millis())		// Return --> it's not time yet
 		return; 
 
-	lasttime = millis();							// It's time! Record new time & continue
+	lasttime = millis();							// It's time! Record new start time & continue
 
 
-	// // Reset the things if new string to display
-	// if ((last_p != p) || (*p != *last_p)) // compares ptr and 1st character change... I think - I'm not great with pointers :( 
-	// {
-	// 	// NOTE: This assumes either different ptr value for each string, OR different start charater
-	// 	// That will cover most cases anyway
-	// 	// New string! (probably?) - Reset the things!
-	// 	*last_p = *p;
-	// 	letterNum = 0;
-	// 	disp.clear();		
-	// }
+	// Reset the things if new string to display
+	if ((last_p != p) || (*p != *last_p)) // compares ptr and 1st character change... I think - I'm not great with pointers :( 
+	{
+		#ifdef debugMSG
+			Serial.println("NEW STRING!");
+		#endif
+
+
+		// NOTE: This assumes either different ptr value for each string, OR different start charater
+		// That will cover most cases anyway
+		// New string! (probably?) - Reset the things!
+		last_p = p;
+		letterNum = 0;
+		charCol = 0;
+		scrollTextComplete = false;
+		disp.clear();		
+	}
 
 	if (charCol == 0)
 	{
 		// Loop back to start of string
 		if (*(p + letterNum) == '\0')
+		{
 			letterNum = 0;
+			scrollTextComplete = true;
+		}
 
 		// For some reason 'spaces' aren't displaying properly - handle this case
 		if (*(p + letterNum) == ' ')
@@ -658,7 +754,7 @@ void scrollText(const char *p)
 	// Shift display left one column
 	disp.transform(MD_MAX72XX::TSL);	
 
-	// Display first column of that character
+	// Display one column of current character
 	disp.setColumn(0, cBuf[charCol++]);
 
 	if (charCol > charWidth)
@@ -674,7 +770,6 @@ void staticText(const char *p)
 
 	uint8_t cBuf[(DISP_NUM_PANELS+1) * 8];	// Screen buffer
 	uint8_t width_full = 0;					// Cumulative width of text
-
 
 	// Work out width of text while loading characters into buffer
 	// While still in string && buffer has space
