@@ -1,6 +1,6 @@
 // 'Simon Game' assembled by S.Eames with help from the internet (thanks team :) )
 
-#define debugMSG	1				// Uncomment to get debug / error messages in console
+// #define debugMSG	1				// Uncomment to get debug / error messages in console
 
 // Include libraries
 #include "FastLED.h"
