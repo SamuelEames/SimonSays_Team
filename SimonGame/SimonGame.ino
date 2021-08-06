@@ -13,7 +13,7 @@
 #define NUM_BTNS 4
 
 
-#define BUZZ_PIN 		5
+#define BEEP_PIN 		5
 #define LED_PIN 		6
 const uint8_t Button[NUM_BTNS] = {7, 8, 9, 10};	// Pins for buttons
 #define RF_CSN_PIN		18
@@ -66,6 +66,8 @@ bool scrollTextComplete = false;		// Set to '1' once text completed a full cycle
 
 //////////////////// MISC VARIABLES ////////////////////
 
+uint32_t beep_starttime = 0;
+
 
 ///// TIMING
 
@@ -75,6 +77,7 @@ bool scrollTextComplete = false;		// Set to '1' once text completed a full cycle
 #define LED_EFFECT_LOOP		6 		// Multiplier of LED effect time
 #define TICKER_TIME			80		// (ms) Update interval of ticker text
 #define SCORE_DISPLAY		3000	// (ms) Time score is displayed for after a round
+#define BEEP_TIME			100 	// (ms) period beeper sounds for
 
 // StepTime (ms) is the on & off time intervals of steps played back in a sequence. 
 // SEQ_STEP_PER_BLOCK indicates when speed increases - i.e. after level = SEQ_STEP_PER_BLOCK, seq_StepTime[1] is used for interval
@@ -107,7 +110,6 @@ void setup()
 {
 	// Initialise Display
 	disp.begin();
-	// disp.setIntensity(DISP_INTENSITY);
 	disp.control(2, DISP_INTENSITY);
 	disp.clear();
 
@@ -118,9 +120,9 @@ void setup()
 		btnState_last[i] = 1;				// Set initial assumed button state
 	}
 
-	// Initialise Buzzer
-	pinMode(BUZZ_PIN, OUTPUT);
-	digitalWrite(BUZZ_PIN, HIGH);
+	// Initialise beeper
+	pinMode(BEEP_PIN, OUTPUT);
+	digitalWrite(BEEP_PIN, HIGH);
 
 	// Initialise LEDs
 	FastLED.addLeds<WS2812B, LED_PIN, GRB>(leds, NUM_LEDS);
@@ -153,6 +155,8 @@ void loop()
 {
 	static uint32_t lasttime;				// Used for timining intervals
 
+	updateBeepState();
+
 
 	switch (currentState) 
 	{
@@ -179,12 +183,16 @@ void loop()
 		case ST_SeqPlay:
 			
 			// Reset variables
-			if (lastState == ST_Intro)
+			// Generate new sequence if we're starting a new game
+			if ((lastState != ST_Correct) && (lastState != currentState))			
 			{
 				generateSequence();
+				lasttime = millis(); 			// Initiate timer
 				seq_StepTimeStage = 0;
+				lastState = currentState;
 			}
-			if (lastState != ST_SeqPlay)
+			
+			if (lastState != currentState)		
 			{
 				lasttime = millis(); 			// Initiate timer
 				OffAllButtons();
@@ -368,6 +376,8 @@ void loop()
 
 		case ST_Incorrect:
 
+			lastState = currentState;
+
 			// Play fail animation
 			if (effectComplete)
 			{
@@ -377,9 +387,18 @@ void loop()
 			else
 			{
 				disp.clear();
-				updateLEDs();
+				updateLEDs();		// Fail LED sequence
 				break;
 			}
+
+			// Check for high score
+
+			Serial.print("ORIGINAL seq_level = ");
+			Serial.print(seq_level);
+
+			// Handle case where 0 levels achieved
+			if (seq_level == 0)
+				seq_level++;
 
 			// check for high score
 			if (--seq_level > highscore)
@@ -389,7 +408,12 @@ void loop()
 				seq_level = 0;					// Reset seq level after using
 			}
 			else
-				currentState = ST_ShowScore;			
+				currentState = ST_ShowScore;		
+
+			Serial.print(", seq_level = ");
+			Serial.print(seq_level);
+			Serial.print(", highscore = ");
+			Serial.println(highscore);
 
 			break;		
 
@@ -430,7 +454,7 @@ void loop()
 		case ST_ShowScore:
 
 			checkStartNewGame();
-			if ((lastState != currentState) && (seq_level != 0))
+			if (lastState != currentState)
 			{
 				dispNumber(seq_level);
 				seq_level = 0;					// Reset seq level after using
@@ -526,7 +550,10 @@ uint8_t checkButtons()
 			btnState_last[i] = btnState_now[i];		// Record button state
 
 			if (!btnState_now[i])
+			{
+				beepNow();
 				return i;							// Return number of button that was just pressed
+			}
 		}
 	}
 
@@ -826,5 +853,29 @@ void dispNumber(uint8_t Number)
 	staticText(charBuf);						// Print to screen!
 
 
+	return;
+}
+
+
+
+void updateBeepState()
+{
+	// Turns beeper off / on according to whether timer has elapsed
+
+	if (millis() < beep_starttime) 			// Timer wrapped -- reset (From memory this state takes about 3 days to get to)
+		beep_starttime = millis();
+
+	if ((beep_starttime + BEEP_TIME) > millis())		
+		digitalWrite(BEEP_PIN, LOW);		// Beep
+	else
+		digitalWrite(BEEP_PIN, HIGH);		// !Beep
+
+	return;
+}
+
+void beepNow()
+{
+	// Resets start time of beep timer
+	beep_starttime = millis();
 	return;
 }
