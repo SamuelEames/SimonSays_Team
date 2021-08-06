@@ -12,7 +12,6 @@
 ///////////////////////// IO /////////////////////////
 #define NUM_BTNS 4
 
-
 #define BEEP_PIN 		5
 #define LED_PIN 		6
 const uint8_t Button[NUM_BTNS] = {7, 8, 9, 10};	// Pins for buttons
