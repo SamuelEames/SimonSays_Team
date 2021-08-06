@@ -8,7 +8,6 @@
 #include "ENUMVars.h"
 #include <MD_MAX72xx.h>
 
-
 ///////////////////////// IO /////////////////////////
 #define NUM_BTNS 4
 
