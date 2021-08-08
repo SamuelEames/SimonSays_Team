@@ -26,18 +26,21 @@ bool btnState_now;
 
 //////////////////// RF VARIABLES ////////////////////
 RF24 radio(RF_CE_PIN, RF_CSN_PIN); 		// CE, CSN
-uint8_t addresses[][6] = {"node0", "node1"}; 	//master address, slave address (same for all slaves)
+
+#define MAX_BTNS 1<<NUM_ADDR_PINS
+uint8_t addrStartCode[] = "SIMN";
+uint8_t nodeAddr[MAX_BTNS][5]; 	//master address, slave address (same for all slaves)
 
 #define RF_BUFF_LEN 2			// Number of bytes to transmit / receive
 uint8_t radioBuf_RX[RF_BUFF_LEN];
 uint8_t radioBuf_TX[RF_BUFF_LEN];
-bool newRFData = false;	// True if new data over radio just in
+bool newRFData = false;			// True if new data over radio just in
 
-bool master = false;		// master runs the show ;) 
-uint8_t myID;				// ID of this station (set in setup() accoding to IO)
-uint8_t myID_flag;			// ID in flag form (master = 0b00000001, node1 = 0c00000010, etc)
-uint8_t btnsPresent = 0x01; // Flags of detected buttons (master is obviously there)
-uint8_t numBtns = 1;		// Number of buttons being used
+bool master = false;			// master runs the show ;) 
+uint8_t myID;					// ID of this station (set in setup() accoding to IO)
+uint8_t myID_flag;				// ID in flag form (master = 0b00000001, node1 = 0c00000010, etc)
+uint8_t btnsPresent = 0x01; 	// Flags of detected buttons (master is obviously there)
+uint8_t numBtns = 1;			// Number of buttons being used
 
 //////////////////// PIXEL SETUP ////////////////////
 #define NUM_LEDS 	12
@@ -150,33 +153,48 @@ void setup()
 
 	myID_flag = 1 << myID;
 
+
+
 	if (myID == 0)
 		master = true;
 	else
 		master = false;
 
-
 	// Initialise Radio
+
+	// Generate node addresses
+	for (uint8_t i = 0; i < MAX_BTNS; ++i)
+	{
+		for (uint8_t j = 0; j < 4; ++j)		// Set first four bytes of address to same code
+			nodeAddr[i][j] = addrStartCode[j];
+
+		nodeAddr[i][4] = i;					// Unique 5th byte according to node address
+	}
+
 	radio.begin();  
+	radio.setAutoAck(1);					// Ensure autoACK is enabled
+	radio.enableAckPayload();				// Allow optional ack payloads
+	radio.setRetries(0,15);					// Smallest time between retries, (max no. of retries is 15)
+ 	radio.setPayloadSize(RF_BUFF_LEN);		// Here we are sending 1-byte payloads to test the call-response speed
+ 
 	radio.setChannel(111);					// Keep out of way of common wifi frequencies
 	radio.setPALevel(RF24_PA_MIN);			// Let's make this powerful... later
 	radio.setDataRate( RF24_2MBPS );		// Let's make this quick
+	// radio.enableAckPayload();
 
-	// Opening Listening pipes
-	if (master)
+	// Opening Listening pipe
+	radio.openReadingPipe(1, nodeAddr[myID]);
+
+	// Setup for slave RF nodes --> only need to listen/write to master
+	if (!master)
 	{
-		radio.openReadingPipe(1, addresses[0]);
-		radio.openWritingPipe(addresses[1]);
-	}
-	else // slave --> sends all messages to master
-	{
-		radio.openReadingPipe(1, addresses[1]);
-		radio.openWritingPipe(addresses[0]);
+		radio.openWritingPipe(nodeAddr[0]);
+		radioBuf_TX[0] = myID_flag;			// Always respond with myID to master
+		radio.startListening();
 	}
 
-	radio.startListening();
-
-
+	radio.writeAckPayload(1, radioBuf_TX, RF_BUFF_LEN); 	// Setup AckPayload
+	
 
 
 	// Initialise Serial debug
@@ -184,9 +202,13 @@ void setup()
 		Serial.begin(115200);				// Open comms line
 		while (!Serial) ; 					// Wait for serial port to be available
 
+		// radio.printDetails();                   // Dump the configuration of the rf unit for debugging
 		Serial.println(F("Wassup?"));
 		Serial.print(F("myID = "));
 		Serial.println(myID);
+
+		Serial.print(F("myID_flag = "));
+		Serial.println(myID_flag, BIN);
 
 		if (master)
 			Serial.println(F("THE MASTER HAS ARRIVED!"));
@@ -194,8 +216,6 @@ void setup()
 
 	// Let the games begin!
 
-
-	
 
 }
 
@@ -543,8 +563,9 @@ void loop()
 		{
 			// Read in 
 			radio.read( radioBuf_RX, RF_BUFF_LEN);
-			newRFData = true;
+			// newRFData = true;
 			Serial.println(F("New RF Message!"));
+			radio.writeAckPayload(1, radioBuf_TX, RF_BUFF_LEN ); 
 		}
 
 		if (newRFData)
@@ -563,7 +584,7 @@ void loop()
 	}
 }
 
-void checkNumBtns()
+void checkNumBtns() // Note: Only called by Master
 {
 	// Broadcasts message asking which buttons are around
 	// Then records present buttons
@@ -607,8 +628,18 @@ void checkNumBtns()
 	{
 		Serial.println(F("Polling Nodes"));
 		radio.stopListening();
-		radio.write(radioBuf_TX, RF_BUFF_LEN); // Transmit message without checking for ack
+		radio.openWritingPipe(nodeAddr[1]);
+		radio.write(radioBuf_TX, RF_BUFF_LEN, 0); // Transmit message & wait for ack
+		
+		
+
+
 		radio.startListening();
+
+		if (radio.available())
+			Serial.println("Received Ack!");
+		else
+			Serial.println("no Ack :(");
 		lasttime = millis();						// It's time! Record new start time & continue
 	}
 
