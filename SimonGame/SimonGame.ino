@@ -26,14 +26,16 @@ bool btnState_now;
 
 //////////////////// RF VARIABLES ////////////////////
 RF24 radio(RF_CE_PIN, RF_CSN_PIN); 		// CE, CSN
-uint8_t addresses[][6] = {"SIMNM", "SIMNS"}; 	//master address, slave address (same for all slaves)
+uint8_t addresses[][6] = {"node0", "node1"}; 	//master address, slave address (same for all slaves)
 
-#define RF_BUFF_LEN = 2;			// Number of bytes to transmit / receive
+#define RF_BUFF_LEN 2			// Number of bytes to transmit / receive
 uint8_t radioBuf_RX[RF_BUFF_LEN];
 uint8_t radioBuf_TX[RF_BUFF_LEN];
+bool newRFData = false;	// True if new data over radio just in
 
 bool master = false;		// master runs the show ;) 
 uint8_t myID;				// ID of this station (set in setup() accoding to IO)
+uint8_t myID_flag;			// ID in flag form (master = 0b00000001, node1 = 0c00000010, etc)
 uint8_t btnsPresent = 0x01; // Flags of detected buttons (master is obviously there)
 uint8_t numBtns = 1;		// Number of buttons being used
 
@@ -86,7 +88,7 @@ uint32_t beep_starttime = 0;
 #define TICKER_TIME			80		// (ms) Update interval of ticker text
 #define SCORE_DISPLAY		3000	// (ms) Time score is displayed for after a round
 #define BEEP_TIME			100 	// (ms) period beeper sounds for
-#define RF_POLL_FREQ		300		// (ms) Period on which nodes are polled 
+#define RF_POLL_FREQ		5000		// (ms) Period on which nodes are polled 
 #define RF_REPLY_DELAY		10 		// (ms) Delay between slave nodes responding to group broadcast
 
 // StepTime (ms) is the on & off time intervals of steps played back in a sequence. 
@@ -146,6 +148,8 @@ void setup()
 		myID += !digitalRead(id_addr_pin[i]);
 	}
 
+	myID_flag = 1 << myID;
+
 	if (myID == 0)
 		master = true;
 	else
@@ -155,7 +159,7 @@ void setup()
 	// Initialise Radio
 	radio.begin();  
 	radio.setChannel(111);					// Keep out of way of common wifi frequencies
-	radio.setPALevel(RF24_PA_MAX);			// Let's make this powerful
+	radio.setPALevel(RF24_PA_MIN);			// Let's make this powerful... later
 	radio.setDataRate( RF24_2MBPS );		// Let's make this quick
 
 	// Opening Listening pipes
@@ -164,7 +168,7 @@ void setup()
 		radio.openReadingPipe(1, addresses[0]);
 		radio.openWritingPipe(addresses[1]);
 	}
-	else
+	else // slave --> sends all messages to master
 	{
 		radio.openReadingPipe(1, addresses[1]);
 		radio.openWritingPipe(addresses[0]);
@@ -198,6 +202,7 @@ void setup()
 void loop() 
 {
 	static uint32_t lasttime;				// Used for timining intervals
+	bool readSuccess = false;
 
 	updateBeepState();
 
@@ -532,17 +537,41 @@ void loop()
 	{
 		// Listen to radio
 		// Respond to broadcast messages
+
+
+		while ( radio.available() )
+		{
+			// Read in 
+			radio.read( radioBuf_RX, RF_BUFF_LEN);
+			newRFData = true;
+			Serial.println(F("New RF Message!"));
+		}
+
+		if (newRFData)
+		{
+			radioBuf_TX[0] = myID_flag;
+
+			// Transmit message
+			radio.stopListening();
+			radio.write(radioBuf_TX, RF_BUFF_LEN); // Transmit message & get ack
+			radio.startListening();
+
+			newRFData = false;
+		}
+
+
 	}
 }
 
 void checkNumBtns()
 {
 	// Broadcasts message asking which buttons are around
+	// Then records present buttons
 
 
 	static uint32_t lasttime = 10000; 				// I want it to run the loop TX part of the code first
 	bool readSuccess = false;
-	uint8_t temp = 0;
+	uint8_t temp = 0;	
 
 	// Timing
 	if (millis() < lasttime) 						// Millis() wrapped around - restart timer
@@ -550,12 +579,15 @@ void checkNumBtns()
 
 	if ((lasttime + RF_POLL_FREQ) > millis())		// Check for radio responses
 	{
-		if ( radio.available() )
+		while ( radio.available() )
 		{
 			// Read in 
-			while (!readSuccess)
-				readSuccess = radio.read( radioBuf_RX, RF_BUFF_LEN);
+			radio.read( radioBuf_RX, RF_BUFF_LEN);
+			newRFData = true;
+		}
 
+		if (newRFData)
+		{
 			btnsPresent |= radioBuf_RX[0];
 
 			// Tally up number of present buttons
@@ -568,14 +600,16 @@ void checkNumBtns()
 				temp >>= 1;
 			}
 
+			newRFData = false;
 		}		
 	} 
 	else
 	{
+		Serial.println(F("Polling Nodes"));
 		radio.stopListening();
-		radio.startWrite(radioBuf_TX, RF_BUFF_LEN); // Transmit message without checking for ack
+		radio.write(radioBuf_TX, RF_BUFF_LEN); // Transmit message without checking for ack
 		radio.startListening();
-		lasttime = millis();							// It's time! Record new start time & continue
+		lasttime = millis();						// It's time! Record new start time & continue
 	}
 
 	return;
