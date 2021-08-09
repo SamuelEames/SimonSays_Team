@@ -236,7 +236,6 @@ void loop()
 			case ST_Lobby: 							// Waiting for someone to initiate a game by pressing any button
 				updateLEDs();
 				
-				
 				if (lastState != ST_Lobby)			// Clears any residual text in scrollText buffer
 				{
 					scrollText(" ");
@@ -261,7 +260,6 @@ void loop()
 
 
 			case ST_SeqPlay:
-				
 				// Reset variables
 				// Generate new sequence if we're starting a new game
 				if ((lastState != ST_Correct) && (lastState != currentState))			
@@ -686,18 +684,22 @@ void generateSequence()
 
 	// fill sequence with random numbers according to number of buttons used in game
 	for (uint8_t i = 0; i < SEQ_MAX_LEN; ++i)
-		{
-			sequence[i] = random(0, numBtnsPresent);
+	{
+		sequence[i] = random(0, MAX_BTNS);
 
-			#ifdef debugMSG
-				Serial.print(F(" "));
-				Serial.print(sequence[i]);
-			#endif
-		}
+		// drop value if it isn't a present button
+		while (!((1U << sequence[i]) & btnsPresent_flag ))
+			sequence[i] = random(0, MAX_BTNS);
 
 		#ifdef debugMSG
-			Serial.println();
+			Serial.print(F(" "));
+			Serial.print(sequence[i]);
 		#endif
+	}
+
+	#ifdef debugMSG
+		Serial.println();
+	#endif
 
 	return;
 }
@@ -752,7 +754,13 @@ void updateLEDs()
 	if (millis() < lasttime) 						// Millis() wrapped around - restart timer
 		lasttime = millis();
 
+	// Used in HighScore effect
 	static uint8_t hue = 0;
+
+	// Variables for Lobby effect
+	static uint8_t step = 0;
+	const uint8_t width = floor(NUM_LEDS / numBtnsPresent);
+	uint8_t pixelNum = 0;							// Current pixel being updated
 
 
 	// Does patterns on LEDs according to state
@@ -763,25 +771,8 @@ void updateLEDs()
 			if ((lasttime + LED_REFRESH) > millis())
 				return; 
 			
-			// for(uint8_t i = 0; i < NUM_LEDS; i++) 
-			// {
-			// 	leds[i] = CHSV(hue, 255, 255);
-			// 	hue += 255/NUM_LEDS;
-			// }
-
-			// for (uint8_t i = 0; i < NUM_LEDS; ++i)
-			// {
-
-			// 	leds[i] = btnCols[i/numBtnsPresent]
-
-			// }
-
-			static uint8_t step = 0;
-			const uint8_t width = floor(NUM_LEDS / numBtnsPresent);
 
 			fill_solid(leds, NUM_LEDS, COL_BLACK); 				// Fill in any unused gaps with black
-
-			uint8_t pixelNum = 0;										// Current pixel being updated
 
 			for (uint8_t i = 0; i < MAX_BTNS; ++i)					// Step through btnsPresent_flags
 			{
@@ -802,10 +793,6 @@ void updateLEDs()
 			if (++step >= NUM_LEDS)
 				step = 0;
 
-
-
-
-
 			break;
 
 
@@ -823,9 +810,9 @@ void updateLEDs()
 			solidDisplay();
 			
 			if (effect_step++ % 2)
-				fill_solid( leds, NUM_LEDS, COL_WHITE);
+				fill_solid(leds, NUM_LEDS, COL_WHITE);
 			else
-				fill_solid( leds, NUM_LEDS, COL_BLACK);
+				fill_solid(leds, NUM_LEDS, COL_BLACK);
 
 
 			if (effect_step > LED_EFFECT_LOOP)
