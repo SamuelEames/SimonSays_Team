@@ -47,7 +47,7 @@ uint8_t numBtnsPresent = 1;				// Number of buttons being used
 
 CRGB leds[NUM_LEDS]; 						// Define the array of leds
 
-#define LED_BRIGHTNESS 10
+#define LED_BRIGHTNESS 50
 
 // Colours!
 #define COL_RED     	0xFF0000
@@ -58,10 +58,11 @@ CRGB leds[NUM_LEDS]; 						// Define the array of leds
 #define COL_CYAN		0x00AAAA
 #define COL_ORANGE	0xFF1C00
 
-const uint32_t BTN_COLS[] = {COL_RED, COL_YELLOW, COL_GREEN, COL_BLUE, COL_PINK, COL_CYAN, COL_ORANGE};
-
 #define COL_WHITE   	0xFFFF7F
 #define COL_BLACK   	0x000000
+
+const uint32_t btnCols[] = {COL_RED, COL_YELLOW, COL_GREEN, COL_BLUE, COL_PINK, COL_CYAN, COL_ORANGE, COL_WHITE};
+
 
 bool effectComplete = false;
 
@@ -607,7 +608,7 @@ void checkNumBtnsPresent() // Note: Only called by Master
 
 		radio.stopListening();
 
-		for (uint8_t i = 1; i < MAX_BTNS; ++i)
+		for (uint8_t i = 1; i < MAX_BTNS; ++i)			// Poll each possible slave node & record those present
 		{
 			radio.openWritingPipe(nodeAddr[i]);
 			radio.write(radioBuf_TX, RF_BUFF_LEN, 0); // Transmit message & wait for ack (blocking function)
@@ -762,11 +763,47 @@ void updateLEDs()
 			if ((lasttime + LED_REFRESH) > millis())
 				return; 
 			
-			for(uint8_t i = 0; i < NUM_LEDS; i++) 
+			// for(uint8_t i = 0; i < NUM_LEDS; i++) 
+			// {
+			// 	leds[i] = CHSV(hue, 255, 255);
+			// 	hue += 255/NUM_LEDS;
+			// }
+
+			// for (uint8_t i = 0; i < NUM_LEDS; ++i)
+			// {
+
+			// 	leds[i] = btnCols[i/numBtnsPresent]
+
+			// }
+
+			static uint8_t step = 0;
+			const uint8_t width = floor(NUM_LEDS / numBtnsPresent);
+
+			fill_solid(leds, NUM_LEDS, COL_BLACK); 				// Fill in any unused gaps with black
+
+			uint8_t pixelNum = 0;										// Current pixel being updated
+
+			for (uint8_t i = 0; i < MAX_BTNS; ++i)					// Step through btnsPresent_flags
 			{
-				leds[i] = CHSV(hue, 255, 255);
-				hue += 255/NUM_LEDS;
+				if ((btnsPresent_flag >> i) & 1U)					// If flag is set (present)
+				{
+					for (uint8_t j = 0; j < width; ++j)				// Light LEDs for present flags
+					{
+						if ( (step + pixelNum) >= NUM_LEDS)			// Loop back to start of pixel chain if we're over
+							leds[step + pixelNum++ - NUM_LEDS] = btnCols[i];
+						else
+							leds[step + pixelNum++] = btnCols[i];	
+					}
+				}
 			}
+
+
+			// Update step count
+			if (++step >= NUM_LEDS)
+				step = 0;
+
+
+
 
 
 			break;
@@ -879,7 +916,7 @@ void LightButton(uint8_t button)
 	// Lights up according to given button number
 
 
-	fill_solid( leds, NUM_LEDS, BTN_COLS[button]);
+	fill_solid( leds, NUM_LEDS, btnCols[button]);
 	FastLED.show();
 
 	return;
