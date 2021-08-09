@@ -47,7 +47,7 @@ uint8_t numBtnsPresent = 1;				// Number of buttons being used
 
 CRGB leds[NUM_LEDS]; 						// Define the array of leds
 
-#define LED_BRIGHTNESS 50
+#define LED_BRIGHTNESS 10
 
 // Colours!
 #define COL_RED     	0xFF0000
@@ -221,365 +221,394 @@ void setup()
 
 void loop() 
 {
-	static uint32_t lasttime;				// Used for timining intervals
+	static uint32_t lasttime;					// Used for timining intervals
 	bool readSuccess = false;
 
 	updateBeepState();
 
-	if (master)
+	if (master)										// (Master) Transmit updates on state change
 	{
+		if (lastState != currentState)
+			updateSlaves();
+	}
+	else 												// (Slave) Check for new RF messages
+		slaveCheckRF();
 
+	switch (currentState) 
+	{
+		case ST_Lobby: 							// Waiting for someone to initiate a game by pressing any button
+			updateLEDs();
+			
+			if (lastState != ST_Lobby)			// Clears any residual text in scrollText buffer
+			{
+				scrollText(" ");
+				btnsPresent_flag = 1;			// Reset list of connected buttons when entering Lobby state
+				lastState = currentState;
+			}
 
-
-		switch (currentState) 
-		{
-			case ST_Lobby: 							// Waiting for someone to initiate a game by pressing any button
-				updateLEDs();
-				
-				if (lastState != ST_Lobby)			// Clears any residual text in scrollText buffer
-				{
-					scrollText(" ");
-					btnsPresent_flag = 1;			// Reset list of connected buttons when entering Lobby state
-					lastState = currentState;
-				}
-
-				checkNumBtnsPresent();
-
+			if (numBtnsPresent >= 4) 			// Game can't start until 4 or more btns present
 				scrollText("PRESS TO PLAY ");
+			else
+				scrollText("-");
 
+
+			if (master)
+			{
+				checkNumBtnsPresent();
 				if (numBtnsPresent >= 4)			// Don't start new game until 4 or more buttons connected
 					checkStartNewGame();				// Start new game if any button pressed
-				
-				break;
+			}
+			else
+				checkButtons();						// This transmits to master if button pressed
+			
+			break;
 
 
-			case ST_Intro:
-				updateLEDs();
-				// Refer to LED function for this part
-				break;
+		case ST_Intro:
+			updateLEDs();
+			// Refer to LED function for this part
+			break;
 
 
-			case ST_SeqPlay:
-				// Reset variables
-				// Generate new sequence if we're starting a new game
-				if ((lastState != ST_Correct) && (lastState != currentState))			
-				{
-					generateSequence();
-					lasttime = millis(); 			// Initiate timer
-					seq_StepTimeStage = 0;
-					lastState = currentState;
-				}
-				
-				if (lastState != currentState)		
-				{
-					lasttime = millis(); 			// Initiate timer
-					OffAllButtons();
-					seq_RecPlayStep = 0;
-					lastState = currentState;
-				}
+		case ST_SeqPlay:
+			// Reset variables
+			// Generate new sequence if we're starting a new game
+			if ((lastState != ST_Correct) && (lastState != currentState))			
+			{
+				generateSequence();
+				lasttime = millis(); 			// Initiate timer
+				seq_StepTimeStage = 0;
+				lastState = currentState;
+			}
+			
+			if (lastState != currentState)		
+			{
+				lasttime = millis(); 			// Initiate timer
+				OffAllButtons();
+				seq_RecPlayStep = 0;
+				lastState = currentState;
+			}
 
-				// Timing
-				if (millis() < lasttime) 			// Timer wrapped -- reset (should never be an issue here)
-					lasttime = millis();
-
-				if ((lasttime + seq_StepTime[seq_StepTimeStage]) > millis())		
-					break; 
-				
+			// Timing
+			if (millis() < lasttime) 			// Timer wrapped -- reset (should never be an issue here)
 				lasttime = millis();
 
-				// Show SeqStep
-				if (seq_LightOn)						// Currently on --> turn off
-				{
-					OffAllButtons();
-					seq_LightOn = !seq_LightOn;
-				}
-				else 										// Currently off --> turn on
-				{
-					LightButton(sequence[seq_RecPlayStep++]);
-					seq_LightOn = !seq_LightOn;
+			if ((lasttime + seq_StepTime[seq_StepTimeStage]) > millis())		
+				break; 
+			
+			lasttime = millis();
 
-					// Calculate StepTimeStage
-					seq_StepTimeStage = floor(seq_RecPlayStep/SEQ_STEP_PER_BLOCK);
-					if (seq_StepTimeStage >= sizeof(seq_StepTime) / sizeof(seq_StepTime[0]))		// NOTE: sizeof returns number of bytes, so divide by number of bytes per variable
-						seq_StepTimeStage = (sizeof(seq_StepTime) / sizeof(seq_StepTime[0])) -1;	// -1 because index starts at 0
-				}
+			// Show SeqStep
+			if (seq_LightOn)						// Currently on --> turn off
+			{
+				OffAllButtons();
+				seq_LightOn = !seq_LightOn;
+			}
+			else 										// Currently off --> turn on
+			{
+				LightButton(sequence[seq_RecPlayStep++]);
+				seq_LightOn = !seq_LightOn;
 
-
-				if (seq_RecPlayStep >= SEQ_MAX_LEN)	// Winner winner chicken dinner!
-				{
-					seq_RecPlayStep = 0;
-					// TODO: handle this case better - all levels achieved!
-				}
+				// Calculate StepTimeStage
+				seq_StepTimeStage = floor(seq_RecPlayStep/SEQ_STEP_PER_BLOCK);
+				if (seq_StepTimeStage >= sizeof(seq_StepTime) / sizeof(seq_StepTime[0]))		// NOTE: sizeof returns number of bytes, so divide by number of bytes per variable
+					seq_StepTimeStage = (sizeof(seq_StepTime) / sizeof(seq_StepTime[0])) -1;	// -1 because index starts at 0
+			}
 
 
-				// GOTO Record state if we've finished playing sequence
-				if (!seq_LightOn && (seq_RecPlayStep > seq_level))
-				{
-					currentState = ST_SeqRec;
-					seq_level++;
-
-					OffAllButtons();
-				}
-				
+			if (seq_RecPlayStep >= SEQ_MAX_LEN)	// Winner winner chicken dinner!
+			{
+				seq_RecPlayStep = 0;
+				// TODO: handle this case better - all levels achieved!
+			}
 
 
-				break;
-
-
-			case ST_SeqRec:
-
-				// Timing								// Note: timer still running from last stage & StepTime same as Play Stage
-				if (millis() < lasttime) 			// Timer wrapped -- reset (should never be an issue here)
-					lasttime = millis();
-
-				// Start indicator
-				if (lastState == ST_SeqPlay)		// Light all buttons white to indicate start of record sequence
-				{
-					// Note: need to measure button presses once we're out of this section so can't use break then
-					if ((lasttime + seq_StepTime[seq_StepTimeStage]) > millis())		
-						break; 
-				
-					lasttime = millis();
-
-
-					if (seq_LightOn) 
-					{
-						OffAllButtons();					// Start rec with all black again
-						lastState = currentState;
-						seq_LightOn = !seq_LightOn;
-						seq_RecPlayStep = 0;				// Reset step variable when starting record sequence
-						staticText("GO!");
-					}
-					else 										// NOTE: this is run first
-					{
-						fill_solid( leds, NUM_LEDS, COL_WHITE);	 	// All White
-						FastLED.show();
-						seq_LightOn = !seq_LightOn;	
-
-						solidDisplay();
-					}
-
-					break;
-				}
-
-
-				// Record player inputs!
-				if ((lasttime + (seq_StepTime[seq_StepTimeStage] * SEQ_INPUTTIME_MULT)) > millis())	
-				{
-					// Turn off previously lit buttons
-					if ((lasttime + seq_StepTime[seq_StepTimeStage]) < millis())
-						OffAllButtons();
-
-					lastBtnPressed = checkButtons();			// check for input
-					if(lastBtnPressed != numBtnsPresent)	// If any button pressed...
-					{
-						disp.clear();
-						LightButton(lastBtnPressed);			// Light up button colour that was pressed
-						lasttime = millis();						// reset timer on button press
-					
-						// Check correct button was pressed
-						if (lastBtnPressed == sequence[seq_RecPlayStep])
-						{
-							#ifdef debugMSG
-								Serial.println(F("Correct"));
-								Serial.print(F("Step Number = "));
-								Serial.println(seq_RecPlayStep);
-							#endif
-
-							if (seq_RecPlayStep >= seq_level-1)	// Go to next state if finished recording sequence
-								currentState = ST_Correct;
-							else
-								seq_RecPlayStep++;							
-						}
-						else
-						{
-							// Incorrect
-							#ifdef debugMSG
-								Serial.println(F("Incorrect"));
-								Serial.print(F("Step Number = "));
-								Serial.print(seq_RecPlayStep);
-								Serial.print(F(", Expected input = "));
-								Serial.print(sequence[seq_RecPlayStep]);
-								Serial.print(F(", Button Pressed = "));
-								Serial.println(lastBtnPressed);
-							#endif
-
-							currentState = ST_Incorrect;
-						}
-					}
-				}
-				else 										// Failed to press button in allowed time frame --> end game
-				{
-					#ifdef debugMSG
-						Serial.println(F("Input timeout"));
-					#endif
-
-					lasttime = millis();
-					currentState = ST_Incorrect;
-				}
-
-				break;
-
-
-			case ST_Correct:
-
-				// Start indicator
-				if (lastState != ST_Correct)		// Keep buttons lit from last State, then play animation
-				{
-					// Note: need to measure button presses once we're out of this section so can't use break then
-					if ((lasttime + LED_EFFECT_TIME) > millis())		
-						break; 
-				
-					lasttime = millis();
-
-
-					if (seq_LightOn) 
-					{
-						OffAllButtons();				// Start with all black again
-						lastState = currentState;
-						seq_LightOn = !seq_LightOn;
-					}
-					else 									// NOTE: this is run first
-					{
-						seq_LightOn = !seq_LightOn;		
-					}
-
-					break;
-				}
-
-				updateLEDs();							// Play success animation
-
-				break;
-
-
-			case ST_Incorrect:
-
-				lastState = currentState;
-
-				// Play fail animation
-				if (effectComplete)
-				{
-					OffAllButtons();
-					effectComplete = false;
-				}
-				else
-				{
-					disp.clear();
-					updateLEDs();						// Fail LED sequence
-					break;
-				}
-
-				// Check for high score
-
-				// Handle case where 0 levels achieved
-				if (seq_level == 0)
-					seq_level++;
-
-				// check for high score
-				if (--seq_level > highscore)
-				{
-					currentState = ST_HighScore;
-					highscore = seq_level;
-					seq_level = 0;						// Reset seq level after using
-				}
-				else
-					currentState = ST_ShowScore;		
-
-				break;		
-
-
-			case ST_HighScore:
-				checkStartNewGame();					// Start new game if any button pressed
-				updateLEDs();
-
-				// Scroll 'high score' text, then show number
-				// TODO: make it only run 'dispNumber' once --> I don't like the flickering screen when it's refreshing unnecessarily
-				if (scrollTextComplete)
-					dispNumber(highscore);
-				else
-				{
-					scrollText("HIGH SCORE   ");
-					break;
-				}
-
-
-				// Show high score value for a bit
-				if (lastState != ST_HighScore)
-				{
-					lasttime = millis(); 			// Initiate timer
-					lastState = currentState;
-				}
-
-				// Timing
-				if (millis() < lasttime) 			// Timer wrapped --> reset (should never be an issue here)
-					lasttime = millis();
-
-				if ((lasttime + SCORE_DISPLAY) > millis())		
-					break; 
-				
-				currentState = ST_Lobby;
-				break;
-
-
-			case ST_ShowScore:
-
-				checkStartNewGame();
-				if (lastState != currentState)
-				{
-					dispNumber(seq_level);
-					seq_level = 0;						// Reset seq level after using
-					lastState = currentState;
-					lasttime = millis();
-				}
-
+			// GOTO Record state if we've finished playing sequence
+			if (!seq_LightOn && (seq_RecPlayStep > seq_level))
+			{
+				// currentState = ST_SeqRec;
+				currentState = ST_PreRec;
+				seq_level++;
 
 				OffAllButtons();
+			}
+			
 
-				// Timing
-				if (millis() < lasttime) 			// Timer wrapped --> reset (should never be an issue here)
-					lasttime = millis();
 
-				if ((lasttime + SCORE_DISPLAY) > millis())		
+			break;
+
+
+
+		case ST_PreRec:
+			// Note: timer still running from last stage & StepTime same as Play Stage
+			if (millis() < lasttime) 			// Timer wrapped -- reset (should never be an issue here)
+				lasttime = millis();
+
+			// PHASE 1 - Stay black for a bit --> update state, stay black until timer elapses
+			// Timing
+			if (lastState != currentState)
+			{
+				lastState = currentState;
+				lasttime = millis();
+			}		
+			
+			if ((lasttime + seq_StepTime[seq_StepTimeStage]) > millis())		
+				break; 
+
+			lasttime = millis();
+
+			// PHASE 2 - All white LEDs
+			if (!seq_LightOn) 
+			{
+				fill_solid( leds, NUM_LEDS, COL_WHITE);	 // Light all buttons white to indicate start of record sequence
+				FastLED.show();
+				seq_LightOn = !seq_LightOn;					// Confused yet? - I am
+				solidDisplay();
+			}	
+			// PHASE 3 - 'GO' and change to next state
+			else
+			{
+				OffAllButtons();					// Start rec with all black again
+				currentState = ST_SeqRec;
+				seq_RecPlayStep = 0;				// Reset step variable when starting record sequence
+				staticText("GO!");
+			}
+
+			break;
+
+
+
+
+		case ST_SeqRec:
+
+			// Timing								
+			if (millis() < lasttime) 			// Timer wrapped -- reset (should never be an issue here)
+				lasttime = millis();
+
+			if (lastState != currentState)	// Update state
+				lastState = currentState;
+
+			///////////////////////////////////////////////////////////////////////////
+
+			// // Start indicator
+			// if (lastState == ST_SeqPlay)		// Light all buttons white to indicate start of record sequence
+			// {
+			// 	// Note: need to measure button presses once we're out of this section so can't use break then
+			// 	if ((lasttime + seq_StepTime[seq_StepTimeStage]) > millis())		
+			// 		break; 
+			
+			// 	lasttime = millis();
+
+
+			// 	if (seq_LightOn) 
+			// 	{
+			// 		OffAllButtons();					// Start rec with all black again
+			// 		lastState = currentState;
+			// 		seq_LightOn = !seq_LightOn;
+			// 		seq_RecPlayStep = 0;				// Reset step variable when starting record sequence
+			// 		staticText("GO!");
+			// 	}
+			// 	else 										// NOTE: this is run first
+			// 	{
+			// 		fill_solid( leds, NUM_LEDS, COL_WHITE);	 	// All White
+			// 		FastLED.show();
+			// 		seq_LightOn = !seq_LightOn;	
+
+			// 		solidDisplay();
+			// 	}
+
+			// 	break;
+			// }
+			///////////////////////////////////////////////////////////////////////////
+
+			// Record player inputs!
+			if ((lasttime + (seq_StepTime[seq_StepTimeStage] * SEQ_INPUTTIME_MULT)) > millis())	
+			{
+				// Turn off previously lit buttons
+				if ((lasttime + seq_StepTime[seq_StepTimeStage]) < millis())
+					OffAllButtons();
+
+				lastBtnPressed = checkButtons();			// check for input
+				if(lastBtnPressed != numBtnsPresent)	// If any button pressed...
+				{
+					disp.clear();
+					LightButton(lastBtnPressed);			// Light up button colour that was pressed
+					lasttime = millis();						// reset timer on button press
+				
+					// Check correct button was pressed
+					if (lastBtnPressed == sequence[seq_RecPlayStep])
+					{
+						#ifdef debugMSG
+							Serial.println(F("Correct"));
+							Serial.print(F("Step Number = "));
+							Serial.println(seq_RecPlayStep);
+						#endif
+
+						if (seq_RecPlayStep >= seq_level-1)	// Go to next state if finished recording sequence
+							currentState = ST_Correct;
+						else
+							seq_RecPlayStep++;							
+					}
+					else
+					{
+						// Incorrect
+						#ifdef debugMSG
+							Serial.println(F("Incorrect"));
+							Serial.print(F("Step Number = "));
+							Serial.print(seq_RecPlayStep);
+							Serial.print(F(", Expected input = "));
+							Serial.print(sequence[seq_RecPlayStep]);
+							Serial.print(F(", Button Pressed = "));
+							Serial.println(lastBtnPressed);
+						#endif
+
+						currentState = ST_Incorrect;
+					}
+				}
+			}
+			else 										// Failed to press button in allowed time frame --> end game
+			{
+				#ifdef debugMSG
+					Serial.println(F("Input timeout"));
+				#endif
+
+				lasttime = millis();
+				currentState = ST_Incorrect;
+			}
+
+			break;
+
+
+		case ST_Correct:
+
+			// Start indicator
+			if (lastState != ST_Correct)		// Keep buttons lit from last State, then play animation
+			{
+				// Note: need to measure button presses once we're out of this section so can't use break then
+				if ((lasttime + LED_EFFECT_TIME) > millis())		
 					break; 
+			
+				lasttime = millis();
 
-				currentState = ST_Lobby;
 
+				if (seq_LightOn) 
+				{
+					OffAllButtons();				// Start with all black again
+					lastState = currentState;
+					seq_LightOn = !seq_LightOn;
+				}
+				else 									// NOTE: this is run first
+				{
+					seq_LightOn = !seq_LightOn;		
+				}
 
-			default:
-			// statements
 				break;
-		}
+			}
 
+			updateLEDs();							// Play success animation
+
+			break;
+
+
+		case ST_Incorrect:
+
+			lastState = currentState;
+
+			// Play fail animation
+			if (effectComplete)
+			{
+				OffAllButtons();
+				effectComplete = false;
+			}
+			else
+			{
+				disp.clear();
+				updateLEDs();						// Fail LED sequence
+				break;
+			}
+
+			// Check for high score
+
+			// Handle case where 0 levels achieved
+			if (seq_level == 0)
+				seq_level++;
+
+			// check for high score
+			if (--seq_level > highscore)
+			{
+				currentState = ST_HighScore;
+				highscore = seq_level;
+				seq_level = 0;						// Reset seq level after using
+			}
+			else
+				currentState = ST_ShowScore;		
+
+			break;		
+
+
+		case ST_HighScore:
+			checkStartNewGame();					// Start new game if any button pressed
+			updateLEDs();
+
+			// Scroll 'high score' text, then show number
+			// TODO: make it only run 'dispNumber' once --> I don't like the flickering screen when it's refreshing unnecessarily
+			if (scrollTextComplete)
+				dispNumber(highscore);
+			else
+			{
+				scrollText("HIGH SCORE   ");
+				break;
+			}
+
+
+			// Show high score value for a bit
+			if (lastState != ST_HighScore)
+			{
+				lasttime = millis(); 			// Initiate timer
+				lastState = currentState;
+			}
+
+			// Timing
+			if (millis() < lasttime) 			// Timer wrapped --> reset (should never be an issue here)
+				lasttime = millis();
+
+			if ((lasttime + SCORE_DISPLAY) > millis())		
+				break; 
+			
+			currentState = ST_Lobby;
+			break;
+
+
+		case ST_ShowScore:
+
+			checkStartNewGame();
+			if (lastState != currentState)
+			{
+				dispNumber(seq_level);
+				seq_level = 0;						// Reset seq level after using
+				lastState = currentState;
+				lasttime = millis();
+			}
+
+
+			OffAllButtons();
+
+			// Timing
+			if (millis() < lasttime) 			// Timer wrapped --> reset (should never be an issue here)
+				lasttime = millis();
+
+			if ((lasttime + SCORE_DISPLAY) > millis())		
+				break; 
+
+			currentState = ST_Lobby;
+
+
+		default:
+		// statements
+			break;
 	}
-	else // Slave device
-	{
-		// Listen to radio
-		// Respond to broadcast messages
 
 
-		while ( radio.available() )
-		{
-			// Read in 
-			radio.read( radioBuf_RX, RF_BUFF_LEN);
-			// newRFData = true;
-			Serial.println(F("New RF Message!"));
-			radio.writeAckPayload(1, radioBuf_TX, RF_BUFF_LEN ); 	//Note: need to re-write ack payload after each use
-		}
-
-		if (newRFData)
-		{
-			radioBuf_TX[0] = myID_flag;
-
-			// Transmit message
-			radio.stopListening();
-			radio.write(radioBuf_TX, RF_BUFF_LEN); // Transmit message & get ack
-			radio.startListening();
-
-			newRFData = false;
-		}
-
-
-	}
 }
 
 void checkNumBtnsPresent() // Note: Only called by Master
@@ -605,6 +634,8 @@ void checkNumBtnsPresent() // Note: Only called by Master
 		#endif
 
 		radio.stopListening();
+
+		radioBuf_TX[0] = ST_TheVoid;						// Blank message - just used to scan present devices
 
 		for (uint8_t i = 1; i < MAX_BTNS; ++i)			// Poll each possible slave node & record those present
 		{
@@ -650,6 +681,8 @@ void checkNumBtnsPresent() // Note: Only called by Master
 				Serial.println(btnsPresent_flag, BIN);
 			#endif
 		}
+
+		updateSlaves();
 
 		radio.startListening();
 
@@ -704,48 +737,189 @@ void generateSequence()
 	return;
 }
 
+uint8_t btnFlag2Num(uint8_t flags)
+{
+	// Returns position of first set flag in number
+	for (uint8_t i = 0; i < MAX_BTNS; ++i)
+	{
+		if ((1U << i ) & flags)
+			return i;
+	}
+
+	return MAX_BTNS;
+}
+
+uint8_t btnFlag2QTY(uint8_t flags)
+{
+	// Returns number of set flags 
+
+	uint8_t temp = 0;
+
+	for (uint8_t i = 0; i < MAX_BTNS; ++i)
+	{
+		if ((1U << i ) & flags)
+			temp++;
+	}
+
+	return temp;
+}
+
 
 uint8_t checkButtons()
 {
-	// Checks button state
-	// If button just pressed returns that button number, else returns NUM_BTNS
+	// Checks if any button has been pressed
+	// Returns ID number of any button just pressed, else returns NUM_BTNS
 
-	// Check for button press input from radios
-
-
-	// Debounce buttons
 	static uint32_t lasttime;
 
+	// Check for button press input from radios if master
+	if (master)
+	{
+		if (radio.available())
+		{
+			radio.read(radioBuf_RX, RF_BUFF_LEN);	// Get received message
+
+			// Return number
+			return btnFlag2Num(radioBuf_RX[0]);
+		}
+	}
+
+	// Debounce buttons
 	if (millis() < lasttime) 						// Millis() wrapped around - restart timer
 		lasttime = millis();
 
-	if ((lasttime + DEBOUNCE) > millis())			// Debounce timer hasn't elapsed
+	if ((lasttime + DEBOUNCE) > millis())		// Debounce timer hasn't elapsed
 		return numBtnsPresent; 
 	
-	lasttime = millis();							// Debouncing complete; record new time & continue
+	lasttime = millis();								// Debouncing complete; record new time & continue
 
 	// Record button state
-	btnState_now = digitalRead(BTN_PIN);	// Read input
+	btnState_now = digitalRead(BTN_PIN);		// Read input
 
-	if (btnState_now != btnState_last) 	// If button state changed 
+	if (btnState_now != btnState_last) 			// If button state changed 
 	{
-		btnState_last = btnState_now;		// Record button state
+		btnState_last = btnState_now;				// Record button state
 
 		if (!btnState_now)
 		{
 			beepNow();
-			return myID;							// Return number of button that was just pressed
+
+			if (master)
+				return myID;							// Return number of button that was just pressed
+			else 											// if slave node, transmit button press to master
+			{
+				radio.stopListening();
+				radio.write(radioBuf_TX, RF_BUFF_LEN, 0); // Transmit message & wait for ack (blocking function)
+				radio.startListening();
+			}				
 		}
 	}
 
-	return numBtnsPresent;								// Return NUM_BTNS if no buttons pressed
+	return numBtnsPresent;							// Return NUM_BTNS if no buttons pressed
+}
+
+void updateSlaves()
+{
+	// Updates state of detected slave buttons
+
+	radioBuf_TX[0] = currentState;		// Send currentState of game in first byte
+
+	switch (currentState) 					// Send other data according to state
+	{
+		case ST_Lobby:
+			radioBuf_TX[1] = btnsPresent_flag;
+			break;
+
+		case ST_HighScore:
+			radioBuf_TX[1] = highscore;
+
+		default:
+			radioBuf_TX[1] = 0x00;
+			break;
+	}
+	
+
+	// Transmit the things to present buttons
+	radio.stopListening();
+
+	for (uint8_t i = 1; i < MAX_BTNS; ++i)	// Note: '0' is master (me) so skip that one
+	{
+		// Skip absent buttons
+		if ((1U << i) & btnsPresent_flag)
+		{
+			radio.openWritingPipe(nodeAddr[i]);
+			radio.write(radioBuf_TX, RF_BUFF_LEN, 0); // Transmit message & wait for ack (blocking function)
+			
+			if (radio.available())
+				radio.read(radioBuf_RX, RF_BUFF_LEN); 		// flush ack responses
+		}
+	}
+
+	radio.startListening();
+
+
+	return;
+}
+
+void slaveCheckRF()
+{
+	// Checks for updates from master & updates state accordingly
+
+
+	if (radio.available())
+	{
+		// Read in message
+		radio.read(radioBuf_RX, RF_BUFF_LEN);
+		// Serial.println(F("New RF Message!"));
+		radio.writeAckPayload(1, radioBuf_TX, RF_BUFF_LEN ); 	//Note: need to re-write ack payload after each use
+	
+		// Update my state based off received message
+		switch (radioBuf_RX[0])
+		{
+			case ST_TheVoid: 	// Do nothing - used to scan present devices
+				Serial.println("Void State");
+				break;
+
+			case ST_Lobby:
+				Serial.println("Lobby State");
+				currentState = ST_Lobby;
+
+				// Record present devices to updated LEDs with
+				btnsPresent_flag = radioBuf_RX[1];
+				numBtnsPresent = (btnFlag2QTY(radioBuf_RX[1]));
+				break;
+
+			case ST_SeqPlay:
+				Serial.println("PLAY!");
+				currentState = ST_SeqPlay_Slave;
+				break;
+
+			case ST_SeqRec:
+				Serial.println("REC!");
+				currentState = ST_SeqRec_Slave;
+				break;
+
+			case ST_HighScore:
+				Serial.println("Highscore State");
+				currentState = ST_HighScore;
+				highscore = radioBuf_RX[1];
+				break;
+
+			default:
+				Serial.print("Default Case = ");
+				Serial.println(radioBuf_RX[0]);
+				currentState = radioBuf_RX[0];
+				break;
+		}
+	}
+
+	return;
 }
 
 
 
 void updateLEDs()
 {
-
 	static uint8_t effect_step = 0;
 	// static uint8_t ticker_step = disp.getXMax();
 	// Debounce buttons
@@ -819,7 +993,11 @@ void updateLEDs()
 			{
 				effect_step = 0;
 				lastState = currentState;
-				currentState = ST_SeqPlay;
+
+				if (master)
+					currentState = ST_SeqPlay;
+				else
+					currentState = ST_SeqPlay_Slave;
 				disp.clear();
 			}
 		
@@ -898,16 +1076,17 @@ void effect_2Step(uint8_t step, uint32_t col_1, uint32_t col_2)
 	return;
 }
 
+
 void LightButton(uint8_t button)
 {
 	// Lights up according to given button number
-
 
 	fill_solid( leds, NUM_LEDS, btnCols[button]);
 	FastLED.show();
 
 	return;
 }
+
 
 void OffAllButtons()
 {
@@ -984,16 +1163,16 @@ void scrollText(const uint8_t *p)
 	if (charCol > charWidth)
 		charCol = 0;
 
-
 	return;
 }
+
 
 void staticText(const char *p)
 {
 	// Prints given text in the center of the display
 
-	uint8_t cBuf[(DISP_NUM_PANELS+1) * 8];	// Screen buffer
-	uint8_t width_full = 0;					// Cumulative width of text
+	uint8_t cBuf[(DISP_NUM_PANELS+1) * 8];		// Screen buffer
+	uint8_t width_full = 0;							// Cumulative width of text
 
 	// Work out width of text while loading characters into buffer
 	// While still in string && buffer has space
@@ -1013,11 +1192,14 @@ void staticText(const char *p)
 	return;
 }
 
+
 void solidDisplay()
 {
 	// Turns on every pixel on display
 	for (uint8_t i = 0; i < DISP_NUM_PANELS*8; ++i)
 		disp.setColumn(i, 0xFF);
+
+	return;
 }
 
 
@@ -1033,7 +1215,7 @@ void dispNumber(uint8_t Number)
 	for (uint8_t i = 0; i < sizeof(charBuf) / sizeof(charBuf[0]); ++i)
 		charBuf[i] = '\0';
 
-	if (Number < 10)							// 1 Digit numbers
+	if (Number < 10)								// 1 Digit numbers
 		charBuf[0] = Number + numOffset;
 	else if (Number < 100)						// 2 Digit numbers
 	{
@@ -1047,12 +1229,11 @@ void dispNumber(uint8_t Number)
 		charBuf[2] = Number % 10 + numOffset;
 	}
 
-	staticText(charBuf);						// Print to screen!
+	staticText(charBuf);							// Print to screen!
 
 
 	return;
 }
-
 
 
 void updateBeepState()
@@ -1069,6 +1250,7 @@ void updateBeepState()
 
 	return;
 }
+
 
 void beepNow()
 {
