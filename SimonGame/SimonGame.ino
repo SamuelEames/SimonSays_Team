@@ -526,7 +526,7 @@ void loop()
 			}
 
 			// Show high score value for a bit
-			if (lastState != ST_HighScore)
+			if (lastState != currentState)
 			{
 				lasttime = millis(); 			// Initiate timer
 				lastState = currentState;
@@ -802,6 +802,7 @@ void updateSlaves()
 	// Transmit the things to present buttons
 	radioTX2Slaves(numBtnsPresent);
 
+
 	return;
 }
 
@@ -828,6 +829,7 @@ void radioTX2Slaves(uint8_t ID)
 	else 																	// Only signal one slave
 	{
 		radio.openWritingPipe(nodeAddr[ID]);
+		radio.write(radioBuf_TX, RF_BUFF_LEN, 0); 
 		if (radio.available())
 			radio.read(radioBuf_RX, RF_BUFF_LEN); 				// flush ack response
 	}
@@ -853,11 +855,15 @@ void slaveCheckRF()
 		switch (radioBuf_RX[0])
 		{
 			case ST_TheVoid: 	// Do nothing - used to scan present devices
-				Serial.println("Void State");
+				#ifdef debugMSG 
+					Serial.print(F("Void State - "));
+				#endif
 				break;
 
 			case ST_Lobby:
-				Serial.println("Lobby State");
+				#ifdef debugMSG
+					Serial.print(F("Lobby State - "));
+				#endif
 				currentState = ST_Lobby;
 
 				// Record present devices to updated LEDs with
@@ -866,10 +872,13 @@ void slaveCheckRF()
 				break;
 
 			case ST_SeqPlay:
-				Serial.println("PLAY!");
+				#ifdef debugMSG
+					Serial.print(F("PLAY! - "));
+				#endif
+
 				currentState = ST_SeqPlay_Slave;
 
-				if (radioBuf_RX[0] >> myID)
+				if (1U & (radioBuf_RX[1] >> myID))
 					LightButton(myID);
 				else
 					BlackMyLEDs();
@@ -877,15 +886,19 @@ void slaveCheckRF()
 				break;
 
 			case ST_PreRec:
-				Serial.println("PreRec");
+				#ifdef debugMSG
+					Serial.print(F("PreRec - "));
+				#endif
 				currentState = ST_PreRec;
 				seq_StepTimeStage = radioBuf_RX[1];
 				break;
 
 			case ST_SeqRec:
-				Serial.println("REC!");
+				#ifdef debugMSG
+					Serial.print(F("REC! - "));
+				#endif
 				currentState = ST_SeqRec_Slave;
-				if (radioBuf_RX[0] >> myID)
+				if (1U & (radioBuf_RX[1] >> myID))
 					LightButton(myID);
 				else
 					BlackMyLEDs();
@@ -893,17 +906,28 @@ void slaveCheckRF()
 				break;
 
 			case ST_HighScore:
-				Serial.println("Highscore State");
+				#ifdef debugMSG
+					Serial.print(F("Highscore State - "));
+				#endif
 				currentState = ST_HighScore;
-				highscore = radioBuf_RX[1];
+				seq_level = radioBuf_RX[1];			// High score value from master
 				break;
 
 			default:
-				Serial.print("Default Case = ");
-				Serial.println(radioBuf_RX[0]);
+				#ifdef debugMSG
+					Serial.print("Default Case = ");
+					Serial.print(radioBuf_RX[0]);
+					Serial.print(" - ");
+				#endif
 				currentState = radioBuf_RX[0];
 				break;
+
+			
 		}
+
+		#ifdef debugMSG
+			Serial.println(radioBuf_RX[1], BIN);
+		#endif
 	}
 
 	return;
@@ -1097,46 +1121,27 @@ void BlackMyLEDs()
 	return;
 }
 
-void updateSlaveLeds(uint8_t ID, uint8_t flags)
+void updateSlaveLeds(uint8_t ID, uint8_t flags) // Only called by master
 {
 	// Turns button LEDs on/off
 	static uint8_t currentState_last;
 	static uint8_t flags_last;
 	static uint8_t ID_last;
 
+	// Load data to transmit
 	radioBuf_TX[0] = currentState;
 	radioBuf_TX[1] = flags;
 
 	// Don't retransmit identical messages
-	if ((currentState != currentState_last) && (flags != flags_last) && (ID != ID_last))
+	if (((currentState != currentState_last) || (flags != flags_last)) || (ID != ID_last))
+	{
 		radioTX2Slaves(ID);
 
-	// radio.stopListening();
-
-	// if (ID >= numBtnsPresent)										// Transmit to all slaves!
-	// {
-	// 	for (uint8_t i = 1; i < MAX_BTNS; ++i)					// Note: '0' is master (me) so skip that one
-	// 	{
-	// 		// Skip absent buttons
-	// 		if ((1U << i) & btnsPresent_flag)
-	// 		{
-	// 			radio.openWritingPipe(nodeAddr[i]);
-	// 			radio.write(radioBuf_TX, RF_BUFF_LEN, 0); 	// Transmit message & wait for ack (blocking function)
-				
-	// 			if (radio.available())
-	// 				radio.read(radioBuf_RX, RF_BUFF_LEN); 		// flush ack responses
-	// 		}
-	// 	}
-	// }
-	// else 																	// Only signal one slave
-	// {
-	// 	radio.openWritingPipe(nodeAddr[ID]);
-	// 	if (radio.available())
-	// 		radio.read(radioBuf_RX, RF_BUFF_LEN); 				// flush ack response
-	// }
-
-	// radio.startListening();
-
+		currentState_last = currentState;
+		flags_last = flags;
+		ID_last = ID;
+	}
+	
 
 	return;
 }
