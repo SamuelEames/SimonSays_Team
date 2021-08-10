@@ -11,7 +11,7 @@
 ///////////////////////// IO /////////////////////////
 #define NUM_ADDR_PINS 3
 
-#define BEEP_PIN 		3
+#define BEEP_PIN 		5
 #define LED_PIN 		6
 #define BTN_PIN			10
 const uint8_t id_addr_pin[NUM_ADDR_PINS] = {7, 8, 9};	// Pins used to assign ID of station
@@ -445,27 +445,33 @@ void loop()
 			break;
 
 		case ST_Correct:
-
-			// Start indicator
+			// PHASE 1
 			if (lastState != ST_Correct)		// Keep buttons lit from last State, then play animation
 			{
-				// Note: need to measure button presses once we're out of this section so can't use break then
-				if ((lasttime + LED_EFFECT_TIME) > millis())		
-					break; 
-			
+				lastState = currentState;
+				effectComplete = false;
 				lasttime = millis();
+			}
+
+			if ((lasttime + LED_EFFECT_TIME) > millis())		
+				break; 
+		
+			lasttime = millis();
 
 
-				if (seq_LightOn) 
-				{
-					BlackMyLEDs();				// Start with all black again
-					lastState = currentState;
-					seq_LightOn = !seq_LightOn;
-				}
-				else 									// NOTE: this is run first
-					seq_LightOn = !seq_LightOn;		
+			if (seq_LightOn) 
+			{
+				BlackMyLEDs();				// Start with all black again
+				seq_LightOn = !seq_LightOn;
+			}
+			else 									// NOTE: this is run first
+				seq_LightOn = !seq_LightOn;		
 
-				break;
+
+			if (effectComplete)
+			{
+				if (master)								// Master commands state changes
+					currentState = ST_SeqPlay;
 			}
 
 			updateLEDs();							// Play success animation
@@ -1055,25 +1061,18 @@ void updateLEDs()
 			}
 		
 			break;
-		case ST_SeqPlay:
-			// Done in main loop
-			break;
 
-		case ST_SeqRec:
-			// Done in main loop
-			break;
 
 		case ST_Correct:
-			if ((lasttime + LED_EFFECT_TIME) > millis())
+			if ((lasttime + LED_EFFECT_TIME) > millis()) // Hold previous state of LEDs for a bit
 				return; 
 
 			effect_2Step(effect_step++, COL_GREEN, COL_WHITE);
 
 			if (effect_step > LED_EFFECT_LOOP)
 			{
-				effect_step = 0;
-				lastState = currentState;
-				currentState = ST_SeqPlay;
+				effect_step = 0;						// Reset for next time
+				effectComplete = true;
 			}
 			break;
 
@@ -1327,19 +1326,16 @@ void updateBeepState()
 	if (millis() < beep_starttime) 			// Timer wrapped -- reset (From memory this state takes about 3 days to get to)
 		beep_starttime = millis();
 
-	// if ((beep_starttime + BEEP_TIME) > millis())		
-	// 	digitalWrite(BEEP_PIN, LOW);		// Beep
-	// else
-	// 	digitalWrite(BEEP_PIN, HIGH);		// !Beep
-
-	if ((beep_starttime + BEEP_TIME) > millis())	
+	// Piezo buzzers I got make annoying noise when 'not on'
+	// Setting port to input stops this annoying noise
+	if ((beep_starttime + BEEP_TIME) > millis())		// Beep
 	{
 		pinMode(BEEP_PIN, OUTPUT);
-		tone(BEEP_PIN, 880);		// Beep
+		tone(BEEP_PIN, 880);		
 	}	
-	else
+	else 															// !Beep	
 	{
-		noTone(BEEP_PIN);		// !Beep	
+		noTone(BEEP_PIN);		
 		pinMode(BEEP_PIN, INPUT);
 	}
 
@@ -1352,6 +1348,5 @@ void beepNow()
 	// Resets start time of beep timer
 	beep_starttime = millis();
 
-	// tone(BEEP_PIN, 880, BEEP_TIME);
 	return;
 }
