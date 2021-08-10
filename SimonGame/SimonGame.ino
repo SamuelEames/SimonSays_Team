@@ -505,46 +505,67 @@ void loop()
 				highscore = seq_level;
 				seq_level = 0;						// Reset seq level after using
 			}
-			else
+			else if (master)						// Note: slaves are commanded by master to change state
 				currentState = ST_ShowScore;		
 
 			break;		
 
 
 		case ST_HighScore:
-			checkStartNewGame();					// Start new game if any button pressed
-			updateLEDs();
-
 			// Scroll 'high score' text, then show number
-			// TODO: make it only run 'dispNumber' once --> I don't like the flickering screen when it's refreshing unnecessarily
-			if (scrollTextComplete)
-				dispNumber(highscore);
+							
+			if (master)									// Start new game if any button pressed
+				checkStartNewGame();
 			else
-			{
-				scrollText("HIGH SCORE   ");
-				break;
-			}
+				checkButtons();
+
+
+			updateLEDs();
 
 			// Show high score value for a bit
 			if (lastState != currentState)
 			{
-				lasttime = millis(); 			// Initiate timer
 				lastState = currentState;
+				scrollTextComplete = false;		// Reset on first run
+				effectComplete = false;
 			}
 
-			if ((lasttime + SCORE_DISPLAY) > millis())		// Timing
-				break; 
-			
-			currentState = ST_Lobby;
+			// PHASE 1 - Scroll text
+			if (!scrollTextComplete)
+				scrollText("HIGH SCORE   ");
+			else
+			{
+				if ((lasttime + SCORE_DISPLAY) > millis())		// Timing - not ready to continue yet
+					break; 
+				
+				lasttime = millis(); 				// Initiate timer
+				
+				// PHASE 2 - Show Score
+				if (!effectComplete)
+				{
+					dispNumber(highscore);
+					effectComplete = true;
+				}
+				// PHASE 3 - Goto next stage
+				else
+					currentState = ST_Lobby;
+			}
+
 			break;
 
 
 		case ST_ShowScore:
 
-			checkStartNewGame();
+			if (master)									// Start new game if any button pressed
+				checkStartNewGame();
+			else
+				checkButtons();
+
 			if (lastState != currentState)
 			{
 				dispNumber(seq_level);
+				Serial.print("SeqLevel = ");
+				Serial.println(seq_level);
 				seq_level = 0;						// Reset seq level after using
 				lastState = currentState;
 				lasttime = millis();
@@ -789,9 +810,15 @@ void updateSlaves()
 
 		case ST_PreRec:
 			radioBuf_RX[1] = seq_StepTimeStage;
+			break;
 
 		case ST_HighScore:
 			radioBuf_TX[1] = highscore;
+			break;
+
+		case ST_ShowScore:
+			radioBuf_TX[1] = seq_level;
+			break;
 
 		default:
 			radioBuf_TX[1] = 0x00;
@@ -910,7 +937,16 @@ void slaveCheckRF()
 					Serial.print(F("Highscore State - "));
 				#endif
 				currentState = ST_HighScore;
-				seq_level = radioBuf_RX[1];			// High score value from master
+				highscore = radioBuf_RX[1];			// High score value from master
+				break;
+
+			case ST_ShowScore:
+				#ifdef debugMSG
+					Serial.print(F("Show score state - "));
+				#endif
+				currentState = ST_ShowScore;
+				seq_level = radioBuf_RX[1];
+
 				break;
 
 			default:
