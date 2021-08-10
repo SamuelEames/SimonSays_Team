@@ -11,7 +11,7 @@
 ///////////////////////// IO /////////////////////////
 #define NUM_ADDR_PINS 3
 
-#define BEEP_PIN 		5
+#define BEEP_PIN 		3
 #define LED_PIN 		6
 #define BTN_PIN			10
 const uint8_t id_addr_pin[NUM_ADDR_PINS] = {7, 8, 9};	// Pins used to assign ID of station
@@ -135,7 +135,7 @@ void setup()
 
 	// Initialise beeper
 	pinMode(BEEP_PIN, OUTPUT);
-	digitalWrite(BEEP_PIN, HIGH);
+	digitalWrite(BEEP_PIN, LOW);
 
 	// Initialise LEDs
 	FastLED.addLeds<WS2812B, LED_PIN, GRB>(leds, NUM_LEDS);
@@ -1327,10 +1327,21 @@ void updateBeepState()
 	if (millis() < beep_starttime) 			// Timer wrapped -- reset (From memory this state takes about 3 days to get to)
 		beep_starttime = millis();
 
-	if ((beep_starttime + BEEP_TIME) > millis())		
-		digitalWrite(BEEP_PIN, LOW);		// Beep
+	// if ((beep_starttime + BEEP_TIME) > millis())		
+	// 	digitalWrite(BEEP_PIN, LOW);		// Beep
+	// else
+	// 	digitalWrite(BEEP_PIN, HIGH);		// !Beep
+
+	if ((beep_starttime + BEEP_TIME) > millis())	
+	{
+		pinMode(BEEP_PIN, OUTPUT);
+		tone(BEEP_PIN, 880);		// Beep
+	}	
 	else
-		digitalWrite(BEEP_PIN, HIGH);		// !Beep
+	{
+		noTone(BEEP_PIN);		// !Beep	
+		pinMode(BEEP_PIN, INPUT);
+	}
 
 	return;
 }
@@ -1340,5 +1351,7 @@ void beepNow()
 {
 	// Resets start time of beep timer
 	beep_starttime = millis();
+
+	// tone(BEEP_PIN, 880, BEEP_TIME);
 	return;
 }
