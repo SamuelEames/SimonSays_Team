@@ -268,6 +268,7 @@ void loop()
 
 
 		case ST_Intro:
+			disp.clear();
 			updateLEDs();
 			// Refer to LED function for this part
 			break;
@@ -362,7 +363,7 @@ void loop()
 				fill_solid( leds, NUM_LEDS, COL_WHITE);	 // Light all buttons white to indicate start of record sequence
 				FastLED.show();
 				seq_LightOn = !seq_LightOn;					// Confused yet? - I am
-				solidDisplay();
+				// solidDisplay();
 			}	
 			// PHASE 3 - 'GO' and change to next state
 			else
@@ -393,7 +394,7 @@ void loop()
 				lastBtnPressed = checkButtons();			// check for input
 				if(lastBtnPressed != numBtnsPresent)	// If any button pressed...
 				{
-					disp.clear();
+					// disp.clear();
 					LightButton(lastBtnPressed);			// Light up button colour that was pressed
 					lasttime = millis();						// reset timer on button press
 				
@@ -445,14 +446,16 @@ void loop()
 			break;
 
 		case ST_Correct:
+			disp.clear();
 			// PHASE 1
-			if (lastState != ST_Correct)		// Keep buttons lit from last State, then play animation
+			if (lastState != ST_Correct)				// Keep buttons lit from last State, then play animation
 			{
 				lastState = currentState;
 				effectComplete = false;
 				lasttime = millis();
 			}
 
+			// Timing
 			if ((lasttime + LED_EFFECT_TIME) > millis())		
 				break; 
 		
@@ -461,28 +464,26 @@ void loop()
 
 			if (seq_LightOn) 
 			{
-				BlackMyLEDs();				// Start with all black again
+				BlackMyLEDs();								// Start with all black again
 				seq_LightOn = !seq_LightOn;
 			}
-			else 									// NOTE: this is run first
+			else 												// NOTE: this is run first
 				seq_LightOn = !seq_LightOn;		
-
 
 			if (effectComplete)
 			{
-				if (master)								// Master commands state changes
+				if (master)									// Master commands state changes
 					currentState = ST_SeqPlay;
 			}
 
-			updateLEDs();							// Play success animation
+			updateLEDs();									// Play success animation
 
 			break;
 		
 
 
-
 		case ST_Incorrect:
-
+			disp.clear();
 			lastState = currentState;
 
 			// Play fail animation
@@ -493,7 +494,7 @@ void loop()
 			}
 			else
 			{
-				disp.clear();
+				// disp.clear();
 				updateLEDs();						// Fail LED sequence
 				break;
 			}
@@ -1040,7 +1041,7 @@ void updateLEDs()
 			if ((lasttime + LED_EFFECT_TIME) > millis())
 				return; 
 
-			solidDisplay();
+			// solidDisplay();
 			
 			if (effect_step++ % 2)
 				fill_solid(leds, NUM_LEDS, COL_WHITE);
