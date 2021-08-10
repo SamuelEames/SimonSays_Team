@@ -200,8 +200,8 @@ void setup()
 
 	// Initialise Serial debug
 	#ifdef debugMSG
-		Serial.begin(115200);				// Open comms line
-		while (!Serial) ; 					// Wait for serial port to be available
+		Serial.begin(115200);						// Open comms line
+		while (!Serial) ; 							// Wait for serial port to be available
 
 		Serial.println(F("Wassup?"));
 		Serial.print(F("myID = "));
@@ -221,32 +221,35 @@ void setup()
 
 void loop() 
 {
-	static uint32_t lasttime;					// Used for timining intervals
+	static uint32_t lasttime;						// Used for timining intervals
 	bool readSuccess = false;
 
 	updateBeepState();
 
-	if (master)										// (Master) Transmit updates on state change
+	if (millis() < lasttime) 						// Timer wrapped -- reset it
+		lasttime = millis();
+
+	if (master)											// (Master) Transmit updates on state change
 	{
 		if (lastState != currentState)
 			updateSlaves();
 	}
-	else 												// (Slave) Check for new RF messages
+	else 													// (Slave) Check for new RF messages
 		slaveCheckRF();
 
 	switch (currentState) 
 	{
-		case ST_Lobby: 							// Waiting for someone to initiate a game by pressing any button
+		case ST_Lobby: 								// Waiting for someone to initiate a game by pressing any button
 			updateLEDs();
 			
-			if (lastState != ST_Lobby)			// Clears any residual text in scrollText buffer
+			if (lastState != ST_Lobby)				// Clears any residual text in scrollText buffer
 			{
 				scrollText(" ");
-				btnsPresent_flag = 1;			// Reset list of connected buttons when entering Lobby state
+				btnsPresent_flag = 1;				// Reset list of connected buttons when entering Lobby state
 				lastState = currentState;
 			}
 
-			if (numBtnsPresent >= 4) 			// Game can't start until 4 or more btns present
+			if (numBtnsPresent >= 4) 				// Game can't start until 4 or more btns present
 				scrollText("PRESS TO PLAY ");
 			else
 				scrollText("-");
@@ -271,40 +274,36 @@ void loop()
 
 
 		case ST_SeqPlay:
-			// Reset variables
+			// RESET VARIABLES
 			// Generate new sequence if we're starting a new game
 			if ((lastState != ST_Correct) && (lastState != currentState))			
 			{
 				generateSequence();
-				lasttime = millis(); 			// Initiate timer
 				seq_StepTimeStage = 0;
-				lastState = currentState;
 			}
 			
 			if (lastState != currentState)		
 			{
-				lasttime = millis(); 			// Initiate timer
-				OffAllButtons();
+				lasttime = millis(); 				// Initiate timer
+				BlackMyLEDs();
 				seq_RecPlayStep = 0;
 				lastState = currentState;
 			}
 
 			// Timing
-			if (millis() < lasttime) 			// Timer wrapped -- reset (should never be an issue here)
-				lasttime = millis();
-
 			if ((lasttime + seq_StepTime[seq_StepTimeStage]) > millis())		
 				break; 
 			
 			lasttime = millis();
 
 			// Show SeqStep
-			if (seq_LightOn)						// Currently on --> turn off
+			if (seq_LightOn)							// Currently on --> turn off
 			{
-				OffAllButtons();
+				BlackMyLEDs();
+				updateSlaveLeds(numBtnsPresent, 0x00);	// All off
 				seq_LightOn = !seq_LightOn;
 			}
-			else 										// Currently off --> turn on
+			else 											// Currently off --> turn on
 			{
 				LightButton(sequence[seq_RecPlayStep++]);
 				seq_LightOn = !seq_LightOn;
@@ -330,20 +329,20 @@ void loop()
 				currentState = ST_PreRec;
 				seq_level++;
 
-				OffAllButtons();
+				BlackMyLEDs();
+				updateSlaveLeds(numBtnsPresent, 0x00);	// All off
 			}
 			
-
-
 			break;
 
 
+		case ST_SeqPlay_Slave:
+			disp.clear();
+			seq_LightOn = false; 				// Turn off so next state is correct
+			break;
+
 
 		case ST_PreRec:
-			// Note: timer still running from last stage & StepTime same as Play Stage
-			if (millis() < lasttime) 			// Timer wrapped -- reset (should never be an issue here)
-				lasttime = millis();
-
 			// PHASE 1 - Stay black for a bit --> update state, stay black until timer elapses
 			// Timing
 			if (lastState != currentState)
@@ -368,7 +367,7 @@ void loop()
 			// PHASE 3 - 'GO' and change to next state
 			else
 			{
-				OffAllButtons();					// Start rec with all black again
+				BlackMyLEDs();					// Start rec with all black again
 				currentState = ST_SeqRec;
 				seq_RecPlayStep = 0;				// Reset step variable when starting record sequence
 				staticText("GO!");
@@ -377,56 +376,19 @@ void loop()
 			break;
 
 
-
-
 		case ST_SeqRec:
-
-			// Timing								
-			if (millis() < lasttime) 			// Timer wrapped -- reset (should never be an issue here)
-				lasttime = millis();
-
 			if (lastState != currentState)	// Update state
 				lastState = currentState;
-
-			///////////////////////////////////////////////////////////////////////////
-
-			// // Start indicator
-			// if (lastState == ST_SeqPlay)		// Light all buttons white to indicate start of record sequence
-			// {
-			// 	// Note: need to measure button presses once we're out of this section so can't use break then
-			// 	if ((lasttime + seq_StepTime[seq_StepTimeStage]) > millis())		
-			// 		break; 
-			
-			// 	lasttime = millis();
-
-
-			// 	if (seq_LightOn) 
-			// 	{
-			// 		OffAllButtons();					// Start rec with all black again
-			// 		lastState = currentState;
-			// 		seq_LightOn = !seq_LightOn;
-			// 		seq_RecPlayStep = 0;				// Reset step variable when starting record sequence
-			// 		staticText("GO!");
-			// 	}
-			// 	else 										// NOTE: this is run first
-			// 	{
-			// 		fill_solid( leds, NUM_LEDS, COL_WHITE);	 	// All White
-			// 		FastLED.show();
-			// 		seq_LightOn = !seq_LightOn;	
-
-			// 		solidDisplay();
-			// 	}
-
-			// 	break;
-			// }
-			///////////////////////////////////////////////////////////////////////////
 
 			// Record player inputs!
 			if ((lasttime + (seq_StepTime[seq_StepTimeStage] * SEQ_INPUTTIME_MULT)) > millis())	
 			{
 				// Turn off previously lit buttons
 				if ((lasttime + seq_StepTime[seq_StepTimeStage]) < millis())
-					OffAllButtons();
+				{
+					BlackMyLEDs();
+					updateSlaveLeds(numBtnsPresent, 0x00);	// All off
+				}
 
 				lastBtnPressed = checkButtons();			// check for input
 				if(lastBtnPressed != numBtnsPresent)	// If any button pressed...
@@ -478,6 +440,9 @@ void loop()
 
 			break;
 
+		case ST_SeqRec_Slave:
+			checkButtons();
+			break;
 
 		case ST_Correct:
 
@@ -493,14 +458,12 @@ void loop()
 
 				if (seq_LightOn) 
 				{
-					OffAllButtons();				// Start with all black again
+					BlackMyLEDs();				// Start with all black again
 					lastState = currentState;
 					seq_LightOn = !seq_LightOn;
 				}
 				else 									// NOTE: this is run first
-				{
 					seq_LightOn = !seq_LightOn;		
-				}
 
 				break;
 			}
@@ -508,6 +471,8 @@ void loop()
 			updateLEDs();							// Play success animation
 
 			break;
+		
+
 
 
 		case ST_Incorrect:
@@ -517,7 +482,7 @@ void loop()
 			// Play fail animation
 			if (effectComplete)
 			{
-				OffAllButtons();
+				BlackMyLEDs();
 				effectComplete = false;
 			}
 			else
@@ -560,7 +525,6 @@ void loop()
 				break;
 			}
 
-
 			// Show high score value for a bit
 			if (lastState != ST_HighScore)
 			{
@@ -568,11 +532,7 @@ void loop()
 				lastState = currentState;
 			}
 
-			// Timing
-			if (millis() < lasttime) 			// Timer wrapped --> reset (should never be an issue here)
-				lasttime = millis();
-
-			if ((lasttime + SCORE_DISPLAY) > millis())		
+			if ((lasttime + SCORE_DISPLAY) > millis())		// Timing
 				break; 
 			
 			currentState = ST_Lobby;
@@ -590,17 +550,14 @@ void loop()
 				lasttime = millis();
 			}
 
+			BlackMyLEDs();
 
-			OffAllButtons();
-
-			// Timing
-			if (millis() < lasttime) 			// Timer wrapped --> reset (should never be an issue here)
-				lasttime = millis();
-
-			if ((lasttime + SCORE_DISPLAY) > millis())		
+			if ((lasttime + SCORE_DISPLAY) > millis())		// Timing
 				break; 
 
 			currentState = ST_Lobby;
+
+			break;
 
 
 		default:
@@ -830,6 +787,9 @@ void updateSlaves()
 			radioBuf_TX[1] = btnsPresent_flag;
 			break;
 
+		case ST_PreRec:
+			radioBuf_RX[1] = seq_StepTimeStage;
+
 		case ST_HighScore:
 			radioBuf_TX[1] = highscore;
 
@@ -840,23 +800,39 @@ void updateSlaves()
 	
 
 	// Transmit the things to present buttons
+	radioTX2Slaves(numBtnsPresent);
+
+	return;
+}
+
+void radioTX2Slaves(uint8_t ID)
+{
+	// Transmits to either all slaves or given ID of slave
 	radio.stopListening();
 
-	for (uint8_t i = 1; i < MAX_BTNS; ++i)	// Note: '0' is master (me) so skip that one
+	if (ID >= numBtnsPresent)										// Transmit to all slaves!
 	{
-		// Skip absent buttons
-		if ((1U << i) & btnsPresent_flag)
+		for (uint8_t i = 1; i < MAX_BTNS; ++i)					// Note: '0' is master (me) so skip that one
 		{
-			radio.openWritingPipe(nodeAddr[i]);
-			radio.write(radioBuf_TX, RF_BUFF_LEN, 0); // Transmit message & wait for ack (blocking function)
-			
-			if (radio.available())
-				radio.read(radioBuf_RX, RF_BUFF_LEN); 		// flush ack responses
+			// Skip absent buttons
+			if ((1U << i) & btnsPresent_flag)
+			{
+				radio.openWritingPipe(nodeAddr[i]);
+				radio.write(radioBuf_TX, RF_BUFF_LEN, 0); 	// Transmit message & wait for ack (blocking function)
+				
+				if (radio.available())
+					radio.read(radioBuf_RX, RF_BUFF_LEN); 		// flush ack responses
+			}
 		}
+	}
+	else 																	// Only signal one slave
+	{
+		radio.openWritingPipe(nodeAddr[ID]);
+		if (radio.available())
+			radio.read(radioBuf_RX, RF_BUFF_LEN); 				// flush ack response
 	}
 
 	radio.startListening();
-
 
 	return;
 }
@@ -892,11 +868,28 @@ void slaveCheckRF()
 			case ST_SeqPlay:
 				Serial.println("PLAY!");
 				currentState = ST_SeqPlay_Slave;
+
+				if (radioBuf_RX[0] >> myID)
+					LightButton(myID);
+				else
+					BlackMyLEDs();
+
+				break;
+
+			case ST_PreRec:
+				Serial.println("PreRec");
+				currentState = ST_PreRec;
+				seq_StepTimeStage = radioBuf_RX[1];
 				break;
 
 			case ST_SeqRec:
 				Serial.println("REC!");
 				currentState = ST_SeqRec_Slave;
+				if (radioBuf_RX[0] >> myID)
+					LightButton(myID);
+				else
+					BlackMyLEDs();
+
 				break;
 
 			case ST_HighScore:
@@ -1081,19 +1074,69 @@ void LightButton(uint8_t button)
 {
 	// Lights up according to given button number
 
-	fill_solid( leds, NUM_LEDS, btnCols[button]);
-	FastLED.show();
+	if (button == myID)
+	{
+		fill_solid( leds, NUM_LEDS, btnCols[button]);
+		FastLED.show();
+	}
+	else if (master)
+		updateSlaveLeds(button, 1U << button);
+
 
 	return;
 }
 
 
-void OffAllButtons()
+void BlackMyLEDs()
 {
-	// Turns off lights on buttons
+	// Turns off my lights
 
 	fill_solid( leds, NUM_LEDS, COL_BLACK);
 	FastLED.show();
+
+	return;
+}
+
+void updateSlaveLeds(uint8_t ID, uint8_t flags)
+{
+	// Turns button LEDs on/off
+	static uint8_t currentState_last;
+	static uint8_t flags_last;
+	static uint8_t ID_last;
+
+	radioBuf_TX[0] = currentState;
+	radioBuf_TX[1] = flags;
+
+	// Don't retransmit identical messages
+	if ((currentState != currentState_last) && (flags != flags_last) && (ID != ID_last))
+		radioTX2Slaves(ID);
+
+	// radio.stopListening();
+
+	// if (ID >= numBtnsPresent)										// Transmit to all slaves!
+	// {
+	// 	for (uint8_t i = 1; i < MAX_BTNS; ++i)					// Note: '0' is master (me) so skip that one
+	// 	{
+	// 		// Skip absent buttons
+	// 		if ((1U << i) & btnsPresent_flag)
+	// 		{
+	// 			radio.openWritingPipe(nodeAddr[i]);
+	// 			radio.write(radioBuf_TX, RF_BUFF_LEN, 0); 	// Transmit message & wait for ack (blocking function)
+				
+	// 			if (radio.available())
+	// 				radio.read(radioBuf_RX, RF_BUFF_LEN); 		// flush ack responses
+	// 		}
+	// 	}
+	// }
+	// else 																	// Only signal one slave
+	// {
+	// 	radio.openWritingPipe(nodeAddr[ID]);
+	// 	if (radio.available())
+	// 		radio.read(radioBuf_RX, RF_BUFF_LEN); 				// flush ack response
+	// }
+
+	// radio.startListening();
+
 
 	return;
 }
