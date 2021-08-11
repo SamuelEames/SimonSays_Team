@@ -86,6 +86,20 @@ MD_MAX72XX disp = MD_MAX72XX(HARDWARE_TYPE, DISP_CS_PIN, DISP_NUM_PANELS);
 
 bool scrollTextComplete = false;			// Set to '1' once text completed a full cycle
 
+///////////////////////// AUDIO /////////////////////////
+								 	//	E1,	G1,	Ab1,	A1,	Bb1,	B1,	C1,	D1,	Eb2,	E2,	F2,	F#2,	G2,	A2,	C2,	C0,	D2,	E3,	G3
+const uint16_t notes[] = {0, 330,	392,	415,	440,	466,	494,	262,	294,	622,	659,	698,	740,	784,	880,	523,	131,	587,	1319,	1568, 1480, 1397, 1245, 1047, 831};
+								//0, 1,		2, 	3, 	4, 	5, 	6, 	7, 	8, 	9, 	10,	11, 	12,	13,	14,	15,	16,	17,	18,	19
+const uint8_t lose_song[] = {15, 0, 15, 0, 15};					
+const uint8_t win_song[] = {10,13,18,15,17,19};
+const uint8_t highscore_song[] = {18,0,18,0,0,0,18,0,0,0,15,0,18,0,0,0,19,0,0,0,0,0,0,13,0,0,0,0,0,0,0,
+											0,0,0,0,19,0,20,0,21,0,22,0,0,0,18,0,0,0,24,0,14,0,15,0,0,0,14,0,15,0,17,0,
+											0,0,0,0,19,0,20,0,21,0,22,0,0,0,18,0,0,0,23,0,0,0,23,0,23};
+uint8_t currentNote = 0;
+
+#define SONG_TEMPO 			100 			// (ms) time spent on each note
+#define BEEP_TIME				100 			// (ms) period beeper sounds for
+#define BEEP_NOTE 			880			// (hz) frequency speaker makes when button is pressed
 
 //////////////////// MISC VARIABLES ////////////////////
 
@@ -100,7 +114,6 @@ uint32_t beep_starttime = 0;
 #define LED_EFFECT_LOOP		6 				// Multiplier of LED effect time
 #define TICKER_TIME			80				// (ms) Update interval of ticker text
 #define SCORE_DISPLAY		3000			// (ms) Time score is displayed for after a round
-#define BEEP_TIME				100 			// (ms) period beeper sounds for
 #define RF_POLL_FREQ			5000			// (ms) Period on which nodes are polled 
 #define RF_REPLY_DELAY		10 			// (ms) Delay between slave nodes responding to group broadcast
 
@@ -188,7 +201,7 @@ void setup()
  	radio.setPayloadSize(RF_BUFF_LEN);	// Here we are sending 1-byte payloads to test the call-response speed
  
 	radio.setChannel(111);					// Keep out of way of common wifi frequencies
-	radio.setPALevel(RF24_PA_MIN);		// Let's make this powerful... later
+	radio.setPALevel(RF24_PA_HIGH);		// Let's make this powerful... later
 	radio.setDataRate( RF24_2MBPS );		// Let's make this quick
 
 	// Opening Listening pipe
@@ -1290,8 +1303,16 @@ void dispNumber(uint8_t Number)
 
 void updateBeepState()
 {
-	// Turns beeper off / on according to whether timer has elapsed
+	// Turns beeper off / on according to whether timer has elapsed && plays music for correct/incorrect/highscore
 
+	static uint32_t note_starttime;
+	static uint8_t currentState_last = currentState;
+	static bool beeping = false;
+	uint8_t tempoDivide = 1;
+
+
+
+	// BEEP for button presses
 	if (millis() < beep_starttime) 			// Timer wrapped -- reset (From memory this state takes about 3 days to get to)
 		beep_starttime = millis();
 
@@ -1299,14 +1320,97 @@ void updateBeepState()
 	// Setting port to input stops this annoying noise
 	if ((beep_starttime + BEEP_TIME) > millis())		// Beep
 	{
+		beeping = true;
 		pinMode(BEEP_PIN, OUTPUT);
-		tone(BEEP_PIN, 880);		
+		tone(BEEP_PIN, BEEP_NOTE);		
 	}	
 	else 															// !Beep	
 	{
-		noTone(BEEP_PIN);		
-		pinMode(BEEP_PIN, INPUT);
+		beeping = false;
+		// noTone(BEEP_PIN);		
+		// pinMode(BEEP_PIN, INPUT);
 	}
+
+	if (currentState_last != currentState)
+	{
+		currentNote = 0;
+		currentState_last = currentState;
+	}
+
+	
+
+
+
+	// Play music!
+	if (millis() < note_starttime) 			// Timer wrapped -- reset (From memory this state takes about 3 days to get to)
+		beep_starttime = millis();
+
+	if (currentState == ST_HighScore)
+		tempoDivide = 2;
+	else
+		tempoDivide = 1;
+
+	if ((note_starttime + SONG_TEMPO / tempoDivide) > millis())
+		return;
+
+	switch (currentState)
+	{
+		case ST_Correct:
+			if (currentNote >= sizeof(win_song) / sizeof(win_song[0]))
+			{
+				noTone(BEEP_PIN);
+				pinMode(BEEP_PIN, INPUT);
+			}
+			else
+			{
+				pinMode(BEEP_PIN, OUTPUT);
+				tone(BEEP_PIN, notes[win_song[currentNote++]]) ;
+			}
+			break;
+
+		case ST_Incorrect:
+			if (currentNote >= sizeof(lose_song) / sizeof(lose_song[0]))
+			{
+				noTone(BEEP_PIN);
+				pinMode(BEEP_PIN, INPUT);
+			}
+			else
+			{
+				pinMode(BEEP_PIN, OUTPUT);
+
+				if (lose_song[currentNote++] > 0)
+					tone(BEEP_PIN, notes[lose_song[currentNote]]);
+				else
+					noTone(BEEP_PIN);
+			}
+			break;
+
+		case ST_HighScore:
+			if (currentNote >= sizeof(highscore_song) / sizeof(highscore_song[0]))
+			{
+				noTone(BEEP_PIN);						// Turn off speaker once song finished
+				pinMode(BEEP_PIN, INPUT);
+			}
+			else
+			{
+				pinMode(BEEP_PIN, OUTPUT);
+				tone(BEEP_PIN, notes[highscore_song[currentNote++]]);
+			}
+			break;
+
+
+		default:
+			if (!beeping)
+			{
+				noTone(BEEP_PIN);		
+				pinMode(BEEP_PIN, INPUT);
+			}
+			break;
+	}
+
+
+	note_starttime = millis();
+
 
 	return;
 }
