@@ -1,7 +1,7 @@
 // Extra variables to go with Simon Game because apparently Arduino doesn't accept enum types in .ino files
 
 
-// Game State 		0			1		2			3			4					5			6					7			8			9				10		
+// Game State 		0			1		2			3			4					5			6			7			8				9				10		
 enum gameStates {ST_TheVoid, ST_Lobby, ST_Intro, ST_SeqPlay, ST_SeqPlay_Slave, ST_PreRec, ST_SeqRec, ST_SeqRec_Slave, ST_Correct, ST_Incorrect, ST_HighScore, ST_ShowScore};
 
 /* GAME STATES
