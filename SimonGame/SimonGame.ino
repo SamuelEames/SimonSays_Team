@@ -21,8 +21,8 @@ const uint8_t id_addr_pin[NUM_ADDR_PINS] = {7, 8, 9};	// Pins used to assign ID 
 #define RAND_ANALOG_PIN	21 				// Analog pin -- Leave pin floating -- used to seed random number generator
 
 // Button state tracking
-bool btnState_last;							// NOTE: Using pull-up resistors, so 'HIGH' = off
-bool btnState_now;
+// bool btnState_last;							// NOTE: Using pull-up resistors, so 'HIGH' = off
+// bool btnState_now;
 
 //////////////////// RF VARIABLES ////////////////////
 RF24 radio(RF_CE_PIN, RF_CSN_PIN); 		// CE, CSN
@@ -131,7 +131,7 @@ void setup()
 
 	// Initialise Button
 	pinMode(BTN_PIN, INPUT_PULLUP);
-	btnState_last = digitalRead(BTN_PIN);
+	// btnState_last = digitalRead(BTN_PIN);
 
 	// Initialise beeper
 	pinMode(BEEP_PIN, OUTPUT);
@@ -533,8 +533,6 @@ void loop()
 
 		case ST_HighScore:
 			// Scroll 'high score' text, then show number
-			checkStartNewGame();						// Start new game if any button pressed
-			updateLEDs();
 
 			// Show high score value for a bit
 			if (lastState != currentState)
@@ -542,7 +540,12 @@ void loop()
 				lastState = currentState;
 				scrollTextComplete = false;		// Reset on first run
 				seq_LightOn = false; 				// Used in next state
+				scrollText(" ");						// Flush scrollText of previous text
 			}
+
+			checkStartNewGame();						// Start new game if any button pressed
+			updateLEDs();
+
 
 			// PHASE 1 - Scroll text
 			if (!scrollTextComplete)
@@ -569,28 +572,19 @@ void loop()
 
 
 		case ST_ShowScore:
-
-
 			if (lastState != currentState)
 			{
 				dispNumber(seq_level);
 				seq_level = 0;							// Reset seq level after using
-				lastState = currentState;
 				seq_LightOn = false; 				// Used in next state
 				lasttime = millis();
+				lastState = currentState;
+				BlackMyLEDs();
 			}
 
 			checkStartNewGame();
 			
-			// if (master)									// Start new game if any button pressed
-			// else
-			// {
-			// 	checkButtons();
-			// }
-
-			BlackMyLEDs();
-
-			if ((lasttime + SCORE_DISPLAY) > millis())		// Timing
+			if ((lasttime + SCORE_DISPLAY) > millis())		// Delay a bit
 				break; 
 
 			if (master)
@@ -600,7 +594,7 @@ void loop()
 
 
 		default:
-		// statements
+			// statements
 			break;
 	}
 
@@ -690,14 +684,13 @@ void checkNumBtnsPresent() // Note: Only called by Master
 
 void checkStartNewGame()
 {
-
 	// Initiates new game if any button is pressed
 	if(checkButtons() != numBtnsPresent)
 	{
 		// lastState = currentState;
 		if (master)
 			currentState = ST_Intro;
-		disp.clear();
+		// disp.clear();
 	}
 
 	return;
@@ -768,6 +761,8 @@ uint8_t checkButtons()
 	// Returns ID number of any button just pressed, else returns NUM_BTNS
 
 	static uint32_t lasttime;
+	static bool btnState_now;
+	static bool btnState_last = digitalRead(BTN_PIN);
 
 	// Check for button press input from radios if master
 	if (master)
@@ -805,9 +800,9 @@ uint8_t checkButtons()
 	{
 		btnState_last = btnState_now;				// Record button state
 
-		if (!btnState_now)
+		if (!btnState_now)							// If button is pressed
 		{
-			if (currentState != ST_SeqRec_Slave)
+			if (currentState != ST_SeqRec_Slave) 	// 'Beep' is triggered by master for this case
 				beepNow();
 
 			lasttime = millis();						// Debouncing complete; record new time & continue
@@ -1062,7 +1057,7 @@ void updateLEDs()
 		effect_step = 0;
 		effectComplete = false;
 		currentState_last = currentState;
-		Serial.println("NEW LED STAGE");
+		// Serial.println("NEW LED STAGE");
 	}
 
 
