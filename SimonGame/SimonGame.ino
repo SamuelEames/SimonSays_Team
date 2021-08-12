@@ -10,12 +10,12 @@
 	#define DPRINTLN(...)											//now defines a blank line
 #endif
 
-
 // Include libraries
 #include "FastLED.h"
 #include "RF24.h"
 #include "ENUMVars.h"
 #include <MD_MAX72xx.h>
+#include <EEPROM.h>
 
 ///////////////////////// IO /////////////////////////
 #define NUM_ADDR_PINS 3
@@ -29,9 +29,6 @@ const uint8_t id_addr_pin[NUM_ADDR_PINS] = {7, 8, 9};	// Pins used to assign ID 
 #define DISP_CS_PIN		20
 #define RAND_ANALOG_PIN	21 				// Analog pin -- Leave pin floating -- used to seed random number generator
 
-// Button state tracking
-// bool btnState_last;							// NOTE: Using pull-up resistors, so 'HIGH' = off
-// bool btnState_now;
 
 //////////////////// RF VARIABLES ////////////////////
 RF24 radio(RF_CE_PIN, RF_CSN_PIN); 		// CE, CSN
@@ -128,7 +125,7 @@ uint8_t seq_StepTimeStage = 0;
 #define SEQ_INPUTTIME_MULT	3 		// SEQ_INPUTTIME_MULT * seq_StepTime[x] = max allowed time to press button
 
 
-///// PATTERN
+///// GAME PATTERN
 #define SEQ_MAX_LEN			255			// Maximum sequence length (maximum value uint8_t can store)
 uint8_t sequence[SEQ_MAX_LEN];			// Holds sequence used for game
 uint8_t seq_level = 0;						// Current level achieved of sequence - increments with each success
@@ -137,9 +134,9 @@ uint8_t highscore = 0;						// Holds highest achieved level (since power on);
 uint8_t seq_LightOn = 0;					// (bool) holds whether in on or off state of playing sequence
 uint8_t lastBtnPressed = numBtnsPresent;
 
+#define HS_EEPROM_LOC		2 				// Memory location in EEPROM to use for savinf high scores
 
 //// GAME STATE
-
 gameStates currentState = ST_Lobby;
 gameStates lastState = ST_Lobby;
 
@@ -164,6 +161,7 @@ void setup()
 	fill_solid( leds, NUM_LEDS, COL_BLACK);
 	FastLED.setBrightness(LED_BRIGHTNESS);
 	FastLED.show();
+
 
 	// Initialise address ID inputs & calculate my ID
 	for (uint8_t i = 0; i < NUM_ADDR_PINS; ++i)
@@ -211,14 +209,16 @@ void setup()
 	if (!master)
 	{
 		radio.openWritingPipe(nodeAddr[0]);
-		radioBuf_TX[0] = myID_flag;		// Always respond with myID to master
+		radioBuf_TX[0] = myID_flag;				// Always respond with myID to master
 		radio.startListening();
 	}
+	else
+	{
+		highscore = EEPROM.read(HS_EEPROM_LOC);// Get saved highscore if master
+	} 													
 
 	radio.writeAckPayload(1, radioBuf_TX, RF_BUFF_LEN); 	// Setup AckPayload
 	
-
-
 	// Initialise Serial debug
 	#ifdef DEBUG
 		Serial.begin(115200);						// Open comms line
@@ -231,12 +231,14 @@ void setup()
 		DPRINTLN(myID_flag, BIN);
 
 		if (master)
+		{
 			DPRINTLN(F("THE MASTER HAS ARRIVED!"));
+			DPRINT(F("Saved highscore = "));
+			DPRINTLN(highscore);
+		}
 	#endif
 
 	// Let the games begin!
-
-
 }
 
 void loop() 
@@ -526,18 +528,32 @@ void loop()
 				break;
 			}
 
-			// Check for high score
-			if (seq_level == 0)					// Handle case where 0 levels achieved
-				seq_level++;
-
-			if (--seq_level > highscore)		// check for high score
+			if (master)
 			{
-				currentState = ST_HighScore;
-				highscore = seq_level;
-				seq_level = 0;						// Reset seq level after using
+				// Check for high score
+				if (seq_level == 0)					// Handle case where 0 levels achieved
+					seq_level++;
+
+				if (--seq_level > highscore)		// check for high score
+				{
+					currentState = ST_HighScore;
+					highscore = seq_level;
+					seq_level = 0;						// Reset seq level after using
+
+					// Save new high score to EEPROM
+					EEPROM.write(HS_EEPROM_LOC, highscore);
+
+					// Check it saved properly
+					#ifdef DEBUG
+						if (EEPROM.read(HS_EEPROM_LOC) == highscore)
+							DPRINTLN("Highscore saved successfully!");
+						else
+							DPRINTLN("Highscore didn't save");
+					#endif
+				}
+				else 										// Note: slaves are commanded by master to change state
+					currentState = ST_ShowScore;		
 			}
-			else if (master)						// Note: slaves are commanded by master to change state
-				currentState = ST_ShowScore;		
 
 			break;		
 
