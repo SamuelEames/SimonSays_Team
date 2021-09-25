@@ -2,8 +2,8 @@
 
 // SETUP DEBUG MESSAGES
 // #define DEBUG   //If you comment this line, the DPRINT & DPRINTLN lines are defined as blank.
-#ifdef DEBUG    //Macros are usually in all capital letters.
-	#define DPRINT(...)		Serial.print(__VA_ARGS__)     //DPRINT is a macro, debug print
+#ifdef DEBUG
+	#define DPRINT(...)		Serial.print(__VA_ARGS__)		//DPRINT is a macro, debug print
 	#define DPRINTLN(...)	Serial.println(__VA_ARGS__)	//DPRINTLN is a macro, debug print with new line
 #else
 	#define DPRINT(...)												//now defines a blank line
@@ -45,7 +45,7 @@ bool newRFData = false;						// True if new data over radio just in
 bool master = false;							// master runs the show ;) 
 uint8_t myID;									// ID of this station (set in setup() accoding to IO)
 uint8_t myID_flag;							// ID in flag form (master = 0b00000001, node1 = 0c00000010, etc)
-uint8_t btnsPresent_flag = 0x01; 		// Flags of detected buttons (master is obviously there)
+uint8_t btnsPresent_flag = 0x01; 		// Flags of detected buttons (always at least 1)
 uint8_t numBtnsPresent = 1;				// Number of buttons being used
 
 //////////////////// PIXEL SETUP ////////////////////
@@ -53,12 +53,12 @@ uint8_t numBtnsPresent = 1;				// Number of buttons being used
 
 CRGB leds[NUM_LEDS]; 						// Define the array of leds
 
-#define LED_BRIGHTNESS 10
+#define LED_BRIGHTNESS 255
 
 // Colours!
 #define COL_RED     	0xFF0000
 #define COL_YELLOW  	0xFF8F00
-#define COL_GREEN   	0x00FF00
+#define COL_GREEN   	0x00FF08
 #define COL_BLUE    	0x0000FF
 #define COL_PINK		0xFF002F
 #define COL_CYAN		0x00AAAA
@@ -148,8 +148,9 @@ void setup()
 	disp.control(2, DISP_INTENSITY);
 	disp.clear();
 
-	// Initialise Button
+	// Initialise Inputs
 	pinMode(BTN_PIN, INPUT_PULLUP);
+	pinMode(RAND_ANALOG_PIN, INPUT);
 	// btnState_last = digitalRead(BTN_PIN);
 
 	// Initialise beeper
@@ -1033,18 +1034,23 @@ void updateLEDs()
 			if ((lasttime + LED_REFRESH) > millis())
 				return; 
 			
-			fill_solid(leds, NUM_LEDS, COL_BLACK); 				// Fill in any unused gaps with black
 
-			for (uint8_t i = 0; i < MAX_BTNS; ++i)					// Step through btnsPresent_flags
+			if (numBtnsPresent <= 1)										// Light the colour of this station if only us here
+				fill_solid(leds, NUM_LEDS, btnCols[myID]); 			
+			else
 			{
-				if ((btnsPresent_flag >> i) & 1U)					// If flag is set (present)
+				fill_solid(leds, NUM_LEDS, COL_BLACK); 				// Fill in any unused gaps with black
+				for (uint8_t i = 0; i < MAX_BTNS; ++i)					// Step through btnsPresent_flags
 				{
-					for (uint8_t j = 0; j < width; ++j)				// Light LEDs for present flags
+					if ((btnsPresent_flag >> i) & 1U)					// If flag is set (present)
 					{
-						if ( (step + pixelNum) >= NUM_LEDS)			// Loop back to start of pixel chain if we're over
-							leds[step + pixelNum++ - NUM_LEDS] = btnCols[i];
-						else
-							leds[step + pixelNum++] = btnCols[i];	
+						for (uint8_t j = 0; j < width; ++j)				// Light LEDs for present flags
+						{
+							if ( (step + pixelNum) >= NUM_LEDS)			// Loop back to start of pixel chain if we're over
+								leds[step + pixelNum++ - NUM_LEDS] = btnCols[i];
+							else
+								leds[step + pixelNum++] = btnCols[i];	
+						}
 					}
 				}
 			}
