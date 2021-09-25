@@ -1,5 +1,16 @@
 // 'Simon Game' assembled by S.Eames with help from the internet (thanks team :) )
 
+/* TODO
+
+	* Make LEDs fade out after turning on (dramp effect) to make button presses more distinguished when same button is used twice in a row
+	* Add beep when playing sequence
+	* Inhibit beep on button press in lobby when not enough buttons to start game
+	* Button debouncing isn't amazing (or maybe it's a wireless issue) - sometimes buttons are incorrectly trigged twice when buttons are only hit once
+
+*/
+
+
+
 // SETUP DEBUG MESSAGES
 // #define DEBUG   //If you comment this line, the DPRINT & DPRINTLN lines are defined as blank.
 #ifdef DEBUG
