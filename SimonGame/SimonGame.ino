@@ -1,12 +1,8 @@
 // 'Simon Game' assembled by S.Eames with help from the internet (thanks team :) )
 
 /* TODO
-
 	* Make LEDs fade out after turning on (dramp effect) to make button presses more distinguished when same button is used twice in a row
-	* Add beep when playing sequence
-	* Inhibit beep on button press in lobby when not enough buttons to start game
 	* Button debouncing isn't amazing (or maybe it's a wireless issue) - sometimes buttons are incorrectly trigged twice when buttons are only hit once
-
 */
 
 
@@ -58,6 +54,7 @@ uint8_t myID;									// ID of this station (set in setup() accoding to IO)
 uint8_t myID_flag;							// ID in flag form (master = 0b00000001, node1 = 0c00000010, etc)
 uint8_t btnsPresent_flag = 0x01; 		// Flags of detected buttons (always at least 1)
 uint8_t numBtnsPresent = 1;				// Number of buttons being used
+#define MIN_BTNS 			4 					// Minimum number of buttons required to play game
 
 //////////////////// PIXEL SETUP ////////////////////
 #define NUM_LEDS 		12
@@ -288,7 +285,7 @@ void loop()
 				lastState = currentState;
 			}
 
-			if (numBtnsPresent >= 4) 				// Game can't start until 4 or more btns present
+			if (numBtnsPresent >= MIN_BTNS) 				// Game can't start until 4 or more btns present
 				scrollText("PRESS TO PLAY ");
 			else
 				scrollText("-");
@@ -297,7 +294,7 @@ void loop()
 			if (master)
 			{
 				checkNumBtnsPresent();
-				if (numBtnsPresent >= 4)			// Don't start new game until 4 or more buttons connected
+				if (numBtnsPresent >= MIN_BTNS)			// Don't start new game until 4 or more buttons connected
 					checkStartNewGame();				// Start new game if any button pressed
 			}
 			else
@@ -818,14 +815,16 @@ uint8_t checkButtons()
 		if (!btnState_now)							// If button is pressed
 		{
 			if (currentState != ST_SeqRec_Slave) 	// 'Beep' is triggered by master for this case
-				beepNow();
+			{
+				if (numBtnsPresent >= MIN_BTNS)			// Don't allow beeps in lobby if we can't start new game
+					beepNow();
+			}
+
 
 			lasttime = millis();						// Debouncing complete; record new time & continue
 			
 			if (master)
-			{
 				return myID;							// Return number of button that was just pressed
-			}
 			else 											// if slave node, transmit button press to master
 			{
 				radioBuf_TX[1] = 0xFF;				// Signal button press
@@ -958,7 +957,10 @@ void slaveCheckRF()
 				DPRINT(F("PLAY! - "));
 				currentState = ST_SeqPlay_Slave;
 				if (1U & (radioBuf_RX[1] >> myID))		// Light up our LED if we got signalled to, otherwise blackout
+				{
 					LightButton(myID);
+					beepNow();
+				}
 				else
 					BlackMyLEDs();
 				break;
@@ -1080,7 +1082,7 @@ void updateLEDs()
 			if (effect_step++ % 2)
 				fill_solid(leds, NUM_LEDS, COL_WHITE);
 			else
-				fill_solid(leds, NUM_LEDS, COL_BLACK);
+				fill_solid(leds, NUM_LEDS, btnCols[myID] & 0x0F0F0F);
 
 
 			if (effect_step > LED_EFFECT_LOOP)
@@ -1181,7 +1183,7 @@ void LightButton(uint8_t button)
 void BlackMyLEDs()
 {
 	// Turns off my lights
-	fill_solid( leds, NUM_LEDS, COL_BLACK);
+	fill_solid( leds, NUM_LEDS, btnCols[myID] & 0x0F0F0F);
 	FastLED.show();
 
 	return;
