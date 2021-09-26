@@ -3,6 +3,7 @@
 /* TODO
 	* Make LEDs fade out after turning on (dramp effect) to make button presses more distinguished when same button is used twice in a row
 	* Button debouncing isn't amazing (or maybe it's a wireless issue) - sometimes buttons are incorrectly trigged twice when buttons are only hit once
+	* Master button doesn't beep when playing sequence
 */
 
 
@@ -66,7 +67,7 @@ CRGB leds[NUM_LEDS]; 						// Define the array of leds
 // Colours!
 #define COL_RED     	0xFF0000
 #define COL_YELLOW  	0xFF8F00
-#define COL_GREEN   	0x00FF08
+#define COL_GREEN   	0x00FF10
 #define COL_BLUE    	0x0000FF
 #define COL_PINK		0xFF002F
 #define COL_CYAN		0x00AAAA
@@ -109,6 +110,7 @@ uint8_t currentNote = 0;
 //////////////////// MISC VARIABLES ////////////////////
 
 uint32_t beep_starttime = 0;
+uint32_t lastLEDUpdateTime = 0;
 
 
 ///// TIMING
@@ -130,7 +132,7 @@ uint16_t seq_StepTime[] = {600, 550, 500, 450, 400, 350, 300, 250, 200};
 uint8_t seq_StepTimeStage = 0;
 #define SEQ_STEP_PER_BLOCK	4
 
-#define SEQ_INPUTTIME_MULT	3 		// SEQ_INPUTTIME_MULT * seq_StepTime[x] = max allowed time to press button
+#define SEQ_INPUTTIME_MULT	5 		// SEQ_INPUTTIME_MULT * seq_StepTime[x] = max allowed time to press button
 
 
 ///// GAME PATTERN
@@ -256,6 +258,9 @@ void loop()
 	static bool messageSent = false;
 
 	updateBeepState();
+
+	if (lastLEDUpdateTime + (LED_REFRESH/2) < millis())
+		updateLEDs();
 
 	if (millis() < lasttime) 						// Timer wrapped -- reset it
 		lasttime = millis();
@@ -1017,6 +1022,8 @@ void updateLEDs()
 	static uint8_t currentState_last;
 	static uint8_t effect_step = 0;
 
+	lastLEDUpdateTime = millis(); 									// used for dim down effect externally
+
 	// Variables for HighScore effect
 	static uint8_t hue = 0;
 
@@ -1099,6 +1106,23 @@ void updateLEDs()
 		
 			break;
 
+		// Fade down LEDs
+		case ST_SeqPlay:
+			fadeLedsDown();
+			break;
+
+		case ST_SeqPlay_Slave:
+			fadeLedsDown();
+			break;
+
+		case ST_SeqRec:
+			fadeLedsDown();
+			break;
+
+		case ST_SeqRec_Slave:
+			fadeLedsDown();
+			break;
+
 
 		case ST_Correct:
 			if ((lasttime + LED_EFFECT_TIME) > millis()) // Hold previous state of LEDs for a bit
@@ -1150,6 +1174,19 @@ void updateLEDs()
 	lasttime = millis();
 
 	FastLED.show(); 
+}
+
+void fadeLedsDown()
+{
+	// Fades LEDs down to their dimmed colour value
+
+	if (leds[0] > (CRGB) (btnCols[myID] & 0x0F0F0F))
+	{
+		for (uint8_t i = 0; i < NUM_LEDS; ++i)
+			leds[i].nscale8(230);
+	}
+
+	return;
 }
 
 
